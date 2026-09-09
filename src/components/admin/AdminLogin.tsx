@@ -1,7 +1,5 @@
 import { useState } from "react";
-
-const ADMIN_USER = "admin";
-const ADMIN_PASS = "promises";
+import { supabase } from "../../lib/supabase";
 
 interface Props {
   onSuccess: () => void;
@@ -9,20 +7,36 @@ interface Props {
 }
 
 export default function AdminLogin({ onSuccess, onBack }: Props) {
-  const [user, setUser] = useState("");
-  const [pass, setPass] = useState("");
-  const [error, setError] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (user.trim() === ADMIN_USER && pass === ADMIN_PASS) {
-      sessionStorage.setItem("pt-admin", "1");
-      onSuccess();
-    } else {
-      setError(true);
-      setShake(true);
-      setTimeout(() => setShake(false), 500);
+    setError(null);
+    setLoading(true);
+    
+    try {
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password: password,
+      });
+      
+      if (authError) {
+        setError(authError.message === "Invalid login credentials" 
+          ? "Неверный email или пароль" 
+          : authError.message);
+        setShake(true);
+        setTimeout(() => setShake(false), 500);
+      } else if (data.session) {
+        onSuccess();
+      }
+    } catch (err) {
+      setError("Ошибка подключения к серверу");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -58,14 +72,16 @@ export default function AdminLogin({ onSuccess, onBack }: Props) {
 
         <div className="space-y-4">
           <div>
-            <label className="field-label">Логин</label>
+            <label className="field-label">Email</label>
             <input
               className="field"
-              value={user}
-              onChange={(e) => { setUser(e.target.value); setError(false); }}
-              placeholder="admin"
-              autoComplete="username"
+              type="email"
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); setError(null); }}
+              placeholder="admin@company.com"
+              autoComplete="email"
               autoFocus
+              disabled={loading}
             />
           </div>
           <div>
@@ -73,40 +89,26 @@ export default function AdminLogin({ onSuccess, onBack }: Props) {
             <input
               className="field"
               type="password"
-              value={pass}
-              onChange={(e) => { setPass(e.target.value); setError(false); }}
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError(null); }}
               placeholder="••••••••"
               autoComplete="current-password"
+              disabled={loading}
             />
           </div>
         </div>
 
         {error && (
-          <p className="mt-3 text-[12px] font-medium text-ember">Неверный логин или пароль</p>
+          <p className="mt-3 text-[12px] font-medium text-ember">{error}</p>
         )}
 
         <button
           type="submit"
-          className="font-display mt-6 w-full rounded-lg bg-gold py-2.5 text-[13px] font-bold text-ink-950 transition-all hover:-translate-y-0.5 hover:brightness-110 hover:shadow-lg hover:shadow-gold/25 active:translate-y-0"
+          disabled={loading}
+          className="font-display mt-6 w-full rounded-lg bg-gold py-2.5 text-[13px] font-bold text-ink-950 transition-all hover:-translate-y-0.5 hover:brightness-110 hover:shadow-lg hover:shadow-gold/25 active:translate-y-0 disabled:opacity-60 disabled:cursor-not-allowed"
         >
-          Войти
+          {loading ? "Вход..." : "Войти"}
         </button>
-
-        <div className="mt-5 rounded-lg border border-ink-700/60 bg-ink-850/70 px-3.5 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-mist-500">Демо-доступ</p>
-          <div className="mt-1.5 flex items-center gap-2 text-[12px] text-mist-300">
-            <code className="rounded bg-ink-800 px-1.5 py-0.5 text-[11px] text-gold/90">admin</code>
-            <span className="text-mist-500">/</span>
-            <code className="rounded bg-ink-800 px-1.5 py-0.5 text-[11px] text-gold/90">promises</code>
-            <button
-              type="button"
-              onClick={() => { setUser(ADMIN_USER); setPass(ADMIN_PASS); setError(false); }}
-              className="ml-auto text-[11px] font-semibold text-lagoon transition hover:text-lagoon/80"
-            >
-              подставить
-            </button>
-          </div>
-        </div>
       </form>
     </div>
   );

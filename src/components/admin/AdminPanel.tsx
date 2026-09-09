@@ -4,6 +4,7 @@ import { TIER_LABEL } from "../../data/tree";
 import type { NodePatch } from "../../state/useTreeData";
 import type { ImportResult } from "../../lib/excel";
 import { TEMPLATE_HEADERS, downloadTemplate, parseWorkbook } from "../../lib/excel";
+import { uploadLogo } from "../../lib/supabase";
 
 const CORE_COLOR = "#8fb6c0";
 
@@ -300,12 +301,24 @@ function NodeEditor({ node, onSave, onUpdateCompany }: { node: AnyDef; onSave: (
   const hasShort = node.tier === "company" || node.tier === "value" || node.tier === "root";
   const isCompany = node.tier === "company";
 
-  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [uploading, setUploading] = useState(false);
+  
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => setLogo(event.target?.result as string);
-    reader.readAsDataURL(file);
+    
+    setUploading(true);
+    try {
+      // Загружаем в Supabase Storage
+      const publicUrl = await uploadLogo(file);
+      if (publicUrl) {
+        setLogo(publicUrl);
+      } else {
+        alert("Не удалось загрузить логотип");
+      }
+    } finally {
+      setUploading(false);
+    }
   };
 
   const dirty = title.trim() !== node.title || (hasShort && short.trim() !== (node.short ?? "")) || description.trim() !== node.description || who.trim() !== (node.who ?? "") || toWhom.trim() !== (node.toWhom ?? "") || metrics.trim() !== (node.metrics ?? "") || (isCompany && logo !== node.logo);
@@ -351,9 +364,9 @@ function NodeEditor({ node, onSave, onUpdateCompany }: { node: AnyDef; onSave: (
           <div>
             <label className="field-label">Логотип компании (PNG)</label>
             <div className="flex items-center gap-3">
-              <input ref={logoInputRef} type="file" accept="image/png" onChange={handleLogoUpload} className="hidden" />
-              <button type="button" onClick={() => logoInputRef.current?.click()} className="rounded-lg border border-ink-700/60 bg-ink-850 px-4 py-2 text-[12px] font-semibold text-mist-300 transition hover:border-lagoon/50 hover:text-lagoon">
-                {logo ? "Изменить логотип" : "Загрузить логотип"}
+              <input ref={logoInputRef} type="file" accept="image/png" onChange={handleLogoUpload} className="hidden" disabled={uploading} />
+              <button type="button" onClick={() => logoInputRef.current?.click()} disabled={uploading} className="rounded-lg border border-ink-700/60 bg-ink-850 px-4 py-2 text-[12px] font-semibold text-mist-300 transition hover:border-lagoon/50 hover:text-lagoon disabled:opacity-50 disabled:cursor-not-allowed">
+                {uploading ? "Загрузка..." : logo ? "Изменить логотип" : "Загрузить логотип"}
               </button>
               {logo && (
                 <div className="flex items-center gap-2">

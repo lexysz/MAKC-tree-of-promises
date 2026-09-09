@@ -6,6 +6,8 @@ import AdminLogin from "./components/admin/AdminLogin";
 import AdminPanel from "./components/admin/AdminPanel";
 import { buildGraph, collectFamily } from "./lib/layout";
 import { useTreeData } from "./state/useTreeData";
+import { supabase } from "./lib/supabase";
+import type { Session } from "@supabase/supabase-js";
 
 const DUST = [
   { left: "12%", top: "22%", size: 5, color: "rgba(67,214,181,0.35)", dur: "17s" },
@@ -27,8 +29,26 @@ export default function App() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<View>("tree");
-  const [authed, setAuthed] = useState(() => sessionStorage.getItem("pt-admin") === "1");
+  const [session, setSession] = useState<Session | null>(null);
+  const [authChecking, setAuthChecking] = useState(true);
   const canvasRef = useRef<TreeCanvasHandle>(null);
+  
+  // Проверка сессии Supabase при загрузке
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setAuthChecking(false);
+    });
+    
+    // Подписка на изменения сессии (вход/выход)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    
+    return () => subscription.unsubscribe();
+  }, []);
+  
+  const authed = session !== null;
 
   const selectedNode = selectedId ? byId.get(selectedId) ?? null : null;
   const familySet = useMemo(
@@ -94,11 +114,11 @@ export default function App() {
         />
       ))}
 
-      {loading ? (
+      {loading || authChecking ? (
         <div className="relative z-10 flex h-full w-full items-center justify-center">
           <div className="flex flex-col items-center gap-4">
             <div className="h-12 w-12 animate-spin rounded-full border-4 border-ink-700 border-t-gold"></div>
-            <p className="text-mist-400">Загрузка данных из облака...</p>
+            <p className="text-mist-400">{authChecking ? "Проверка авторизации..." : "Загрузка данных из облака..."}</p>
           </div>
         </div>
       ) : view === "admin" ? (
@@ -107,9 +127,8 @@ export default function App() {
             data={data}
             modified={modified}
             onBack={() => setView("tree")}
-            onLogout={() => {
-              sessionStorage.removeItem("pt-admin");
-              setAuthed(false);
+            onLogout={async () => {
+              await supabase.auth.signOut();
             }}
             onSave={updateNode}
             onUpdateCompany={updateCompany}
@@ -118,7 +137,7 @@ export default function App() {
             onResetAllPositions={resetAllPositions}
           />
         ) : (
-          <AdminLogin onSuccess={() => setAuthed(true)} onBack={() => setView("tree")} />
+          <AdminLogin onSuccess={() => {}} onBack={() => setView("tree")} />
         )
       ) : (
         <>

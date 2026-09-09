@@ -23,6 +23,7 @@ interface Props {
   isAdmin?: boolean;
   onNodeDrag?: (id: string, x: number, y: number) => void;
   companyLogo?: string;
+  zoom?: number;
 }
 
 const K_MIN = 0.08;
@@ -81,7 +82,7 @@ function colorToRGB(color: string): [number, number, number] {
 }
 
 const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props, ref) {
-  const { nodes, edges, bounds, selectedId, familySet, onSelect, isAdmin, onNodeDrag, companyLogo } = props;
+  const { nodes, edges, bounds, selectedId, familySet, onSelect, isAdmin, onNodeDrag, companyLogo, zoom = 1 } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 0.5 });
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -393,6 +394,8 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
           {edges.map((ed) => {
             const active = edgeActive(ed);
             const dim = dimming && !active;
+            // Усиливаем контраст линий при низком zoom
+            const zoomBoost = view.k < 0.3 ? 1.5 : 1;
             return (
               <g key={ed.id} className="edge-g" style={{ opacity: dim ? 0.06 : 1 }}>
                 <path
@@ -402,7 +405,7 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
                   style={{ animationDelay: `${ed.delay}s` }}
                   fill="none"
                   stroke={ed.color}
-                  strokeWidth={active ? 18 : 13}
+                  strokeWidth={(active ? 18 : 13) * zoomBoost}
                   strokeLinecap="round"
                   opacity={active ? 0.2 : 0.08}
                 />
@@ -413,7 +416,7 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
                   style={{ animationDelay: `${ed.delay}s` }}
                   fill="none"
                   stroke={ed.color}
-                  strokeWidth={active ? 5.2 : 3.2}
+                  strokeWidth={(active ? 5.2 : 3.2) * zoomBoost}
                   strokeLinecap="round"
                   opacity={active ? 1 : 0.42}
                 />
@@ -429,6 +432,7 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
               selected={selectedId === nd.id}
               dimmed={dimming && familySet ? !familySet.has(nd.id) : false}
               companyLogo={(nd.tier === "company" || nd.tier === "root") ? companyLogo : undefined}
+              zoom={view.k}
             />
           ))}
         </g>
@@ -468,12 +472,14 @@ function NodeGlyph({
   selected,
   dimmed,
   companyLogo,
+  zoom,
 }: {
   node: GraphNode;
   hovered: boolean;
   selected: boolean;
   dimmed: boolean;
   companyLogo?: string;
+  zoom?: number;
 }) {
   const { tier, r, color, short } = node;
   const lines = tier === "root" ? short.split(" ") : [];
@@ -551,6 +557,18 @@ function NodeGlyph({
             >
               {short}
             </text>
+            {/* Label для ценности при низком zoom */}
+            {zoom !== undefined && zoom < 0.3 && (
+              <text
+                y={r + 40}
+                textAnchor="middle"
+                fontSize={16}
+                fill={color}
+                style={{ fontFamily: "var(--font-display)", fontWeight: 600, textShadow: "0 0 8px rgba(0,0,0,0.8)" }}
+              >
+                {node.title}
+              </text>
+            )}
           </>
         )}
 
