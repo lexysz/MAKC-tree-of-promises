@@ -211,16 +211,16 @@ export default function App() {
             </div>
           </header>
 
-          <div className="hint-in pointer-events-none absolute bottom-4 left-4 z-20 hidden flex-col gap-2.5 rounded-xl border border-ink-700/50 bg-ink-900/80 px-4 py-3 backdrop-blur-md sm:flex md:bottom-5 md:left-5">
-            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-mist-500">Легенда</p>
+          <div className="hint-in pointer-events-none absolute bottom-4 left-4 z-20 hidden flex-col gap-4 rounded-xl border border-ink-700/50 bg-ink-900/80 px-6 py-5 backdrop-blur-md sm:flex md:bottom-5 md:left-5">
+            <p className="text-[14px] font-bold uppercase tracking-[0.18em] text-mist-500">Легенда</p>
             
             <LegendRow
               circle={
-                <svg width="20" height="20" viewBox="0 0 20 20">
-                  <circle cx="10" cy="10" r="9" fill="#0d1b24" stroke="#f2b45a" strokeWidth="1.8" />
-                  <circle cx="10" cy="7" r="1.5" fill="#f2b45a" />
-                  <circle cx="7" cy="12" r="1.5" fill="#f2b45a" />
-                  <circle cx="13" cy="12" r="1.5" fill="#f2b45a" />
+                <svg width="30" height="30" viewBox="0 0 30 30">
+                  <circle cx="15" cy="15" r="13.5" fill="#0d1b24" stroke="#f2b45a" strokeWidth="2.7" />
+                  <circle cx="15" cy="10.5" r="2.25" fill="#f2b45a" />
+                  <circle cx="10.5" cy="18" r="2.25" fill="#f2b45a" />
+                  <circle cx="19.5" cy="18" r="2.25" fill="#f2b45a" />
                 </svg>
               }
               label="Ценность"
@@ -228,20 +228,20 @@ export default function App() {
             
             <LegendRow
               circle={
-                <svg width="20" height="20" viewBox="0 0 20 20">
-                  <circle cx="10" cy="10" r="9" fill="#0d1b24" stroke="#43d6b5" strokeWidth="1.8" />
+                <svg width="30" height="30" viewBox="0 0 30 30">
+                  <circle cx="15" cy="15" r="13.5" fill="#0d1b24" stroke="#43d6b5" strokeWidth="2.7" />
                   {data.company.logo ? (
                     <image
                       href={data.company.logo}
-                      x="4"
-                      y="4"
-                      width="12"
-                      height="12"
+                      x="6"
+                      y="6"
+                      width="18"
+                      height="18"
                       preserveAspectRatio="xMidYMid meet"
-                      clipPath="circle(6px at 10px 10px)"
+                      clipPath="circle(9px at 15px 15px)"
                     />
                   ) : (
-                    <rect x="7" y="7" width="6" height="6" fill="#43d6b5" opacity="0.9" />
+                    <rect x="10.5" y="10.5" width="9" height="9" fill="#43d6b5" opacity="0.9" />
                   )}
                 </svg>
               }
@@ -250,9 +250,9 @@ export default function App() {
             
             <LegendRow
               circle={
-                <svg width="20" height="20" viewBox="0 0 20 20">
-                  <circle cx="10" cy="10" r="9" fill="#0d1b24" stroke="#6fb4f2" strokeWidth="1.8" />
-                  <circle cx="10" cy="10" r="3" fill="#6fb4f2" />
+                <svg width="30" height="30" viewBox="0 0 30 30">
+                  <circle cx="15" cy="15" r="13.5" fill="#0d1b24" stroke="#6fb4f2" strokeWidth="2.7" />
+                  <circle cx="15" cy="15" r="4.5" fill="#6fb4f2" />
                 </svg>
               }
               label="Поддерживающее"
@@ -321,7 +321,7 @@ function Stat({ n, label, color }: { n: number; label: string; color: string }) 
 
 function LegendRow({ circle, label }: { circle: React.ReactNode; label: string }) {
   return (
-    <span className="flex items-center gap-2.5 text-[11.5px] text-mist-400">
+    <span className="flex items-center gap-3.5 text-[17px] text-mist-400">
       {circle}
       {label}
     </span>
