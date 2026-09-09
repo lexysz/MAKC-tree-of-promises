@@ -91,25 +91,57 @@ export function useTreeData() {
   const [modified, setModified] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Загрузка данных из Supabase при старте
+  // Загрузка данных из Supabase при старте + Realtime подписка
   useEffect(() => {
+    let isMounted = true;
+    
     async function loadData() {
       const supabaseData = await loadFromSupabase();
-      if (supabaseData) {
+      if (isMounted && supabaseData) {
         setData(supabaseData);
         setModified(true);
       }
-      setLoading(false);
+      if (isMounted) {
+        setLoading(false);
+      }
     }
     loadData();
+
+    // Подписка на изменения в реальном времени
+    const channel = supabase
+      .channel('tree-data-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tree_data' },
+        async (payload) => {
+          console.log('Realtime update received:', payload);
+          
+          // Загружаем обновлённые данные
+          const updatedData = await loadFromSupabase();
+          if (isMounted && updatedData) {
+            setData(updatedData);
+            setModified(true);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      isMounted = false;
+      supabase.removeChannel(channel);
+    };
   }, []);
 
-  // Сохранение в Supabase при изменении
+  // Сохранение в Supabase при изменении (с debounce)
   useEffect(() => {
     if (!loading) {
-      saveToSupabase(data);
-      saveToStorage(data); // Дублируем в localStorage для кэша
-      setModified(true);
+      const timeoutId = setTimeout(() => {
+        saveToSupabase(data);
+        saveToStorage(data); // Дублируем в localStorage для кэша
+        setModified(true);
+      }, 500); // Задержка 500мс перед сохранением
+
+      return () => clearTimeout(timeoutId);
     }
   }, [data, loading]);
 
