@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { COMPANY, VALUES, getValueColor } from "../data/tree";
 import type { CompanyDef, TreeData, ValueDef } from "../data/tree";
+import { supabase } from "../lib/supabase";
 
 const STORAGE_KEY = "promise-tree-data-v7";
 
@@ -35,18 +36,82 @@ function cloneTree(data: TreeData): TreeData {
   return JSON.parse(JSON.stringify(data));
 }
 
+// Supabase функции
+async function loadFromSupabase(): Promise<TreeData | null> {
+  try {
+    const { data, error } = await supabase
+      .from('tree_data')
+      .select('data')
+      .order('id', { ascending: false })
+      .limit(1)
+      .single();
+
+    if (error || !data) return null;
+    
+    const treeData = data.data as TreeData;
+    treeData.values = treeData.values.map((v, i) => ({ ...v, color: getValueColor(i) }));
+    return treeData;
+  } catch (error) {
+    console.error('Error loading from Supabase:', error);
+    return null;
+  }
+}
+
+async function saveToSupabase(data: TreeData): Promise<void> {
+  try {
+    // Проверяем, есть ли уже запись
+    const { data: existing } = await supabase
+      .from('tree_data')
+      .select('id')
+      .limit(1);
+
+    if (existing && existing.length > 0) {
+      // Обновляем существующую запись
+      await supabase
+        .from('tree_data')
+        .update({ data, updated_at: new Date().toISOString() })
+        .eq('id', existing[0].id);
+    } else {
+      // Создаём новую запись
+      await supabase
+        .from('tree_data')
+        .insert({ data });
+    }
+  } catch (error) {
+    console.error('Error saving to Supabase:', error);
+  }
+}
+
 export function useTreeData() {
   const [data, setData] = useState<TreeData>(() => {
     const stored = loadFromStorage();
     return stored ?? { company: { ...COMPANY }, values: JSON.parse(JSON.stringify(VALUES)) };
   });
 
-  const [modified, setModified] = useState(() => loadFromStorage() !== null);
+  const [modified, setModified] = useState(false);
+  const [loading, setLoading] = useState(true);
 
+  // Загрузка данных из Supabase при старте
   useEffect(() => {
-    saveToStorage(data);
-    setModified(true);
-  }, [data]);
+    async function loadData() {
+      const supabaseData = await loadFromSupabase();
+      if (supabaseData) {
+        setData(supabaseData);
+        setModified(true);
+      }
+      setLoading(false);
+    }
+    loadData();
+  }, []);
+
+  // Сохранение в Supabase при изменении
+  useEffect(() => {
+    if (!loading) {
+      saveToSupabase(data);
+      saveToStorage(data); // Дублируем в localStorage для кэша
+      setModified(true);
+    }
+  }, [data, loading]);
 
   const updateNode = useCallback((id: string, patch: NodePatch) => {
     setData((prev) => {
@@ -129,5 +194,5 @@ export function useTreeData() {
     setModified(false);
   }, []);
 
-  return { data, modified, updateNode, updateCompany, replaceValues, reset, updateNodePosition, resetAllPositions };
+  return { data, modified, loading, updateNode, updateCompany, replaceValues, reset, updateNodePosition, resetAllPositions };
 }

@@ -1,8 +1,26 @@
-node_modules/
-.next/
-dist/
-build/
-*.log
+# Environment variables
 .env
 .env.local
 .env.*.local
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+.next/
+build/

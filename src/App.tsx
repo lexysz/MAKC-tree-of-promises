@@ -20,7 +20,7 @@ const DUST = [
 type View = "tree" | "admin";
 
 export default function App() {
-  const { data, modified, updateNode, updateCompany, replaceValues, reset, updateNodePosition, resetAllPositions } = useTreeData();
+  const { data, modified, loading, updateNode, updateCompany, replaceValues, reset, updateNodePosition, resetAllPositions } = useTreeData();
 
   const graph = useMemo(() => buildGraph(data.company, data.values, data.customPositions), [data]);
   const byId = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
@@ -94,7 +94,14 @@ export default function App() {
         />
       ))}
 
-      {view === "admin" ? (
+      {loading ? (
+        <div className="relative z-10 flex h-full w-full items-center justify-center">
+          <div className="flex flex-col items-center gap-4">
+            <div className="h-12 w-12 animate-spin rounded-full border-4 border-ink-700 border-t-gold"></div>
+            <p className="text-mist-400">Загрузка данных из облака...</p>
+          </div>
+        </div>
+      ) : view === "admin" ? (
         authed ? (
           <AdminPanel
             data={data}
