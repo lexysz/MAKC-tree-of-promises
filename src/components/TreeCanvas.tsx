@@ -539,18 +539,7 @@ function NodeGlyph({
             >
               {short.toUpperCase()}
             </text>
-            {/* Label для компании при низком zoom */}
-            {zoom !== undefined && zoom < 0.3 && (
-              <text
-                y={r + 40}
-                textAnchor="middle"
-                fontSize={16}
-                fill={color}
-                style={{ fontFamily: "var(--font-display)", fontWeight: 600, textShadow: "0 0 8px rgba(0,0,0,0.8)" }}
-              >
-                {node.title}
-              </text>
-            )}
+
           </>
         )}
 
@@ -604,18 +593,7 @@ function NodeGlyph({
                 </text>
               ));
             })()}
-            {/* Label для ценности при низком zoom */}
-            {zoom !== undefined && zoom < 0.3 && (
-              <text
-                y={r + 40}
-                textAnchor="middle"
-                fontSize={16}
-                fill={color}
-                style={{ fontFamily: "var(--font-display)", fontWeight: 600, textShadow: "0 0 8px rgba(0,0,0,0.8)" }}
-              >
-                {node.title}
-              </text>
-            )}
+
           </>
         )}
 

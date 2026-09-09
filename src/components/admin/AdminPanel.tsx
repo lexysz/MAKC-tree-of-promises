@@ -310,11 +310,11 @@ function NodeEditor({ node, onSave, onUpdateCompany }: { node: AnyDef; onSave: (
     setUploading(true);
     try {
       // Загружаем в Supabase Storage
-      const publicUrl = await uploadLogo(file);
-      if (publicUrl) {
-        setLogo(publicUrl);
+      const result = await uploadLogo(file);
+      if (result.success && result.url) {
+        setLogo(result.url);
       } else {
-        alert("Не удалось загрузить логотип");
+        alert(result.error || "Не удалось загрузить логотип");
       }
     } finally {
       setUploading(false);

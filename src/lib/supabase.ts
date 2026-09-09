@@ -13,27 +13,72 @@ export const supabase = createClient(
 );
 
 // Загрузка логотипа в Supabase Storage
-export async function uploadLogo(file: File): Promise<string | null> {
+export async function uploadLogo(file: File): Promise<{ success: boolean; url?: string; error?: string }> {
   try {
+    // Проверяем авторизацию
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      return { 
+        success: false, 
+        error: 'Необходимо войти в систему для загрузки логотипа'
+      };
+    }
+
     const fileExt = file.name.split('.').pop();
     const fileName = `company-logo.${fileExt}`;
     
+    // Проверяем существование bucket
+    const { data: buckets, error: bucketError } = await supabase.storage.listBuckets();
+    if (bucketError) {
+      return { 
+        success: false, 
+        error: 'Ошибка доступа к хранилищу. Проверьте настройки Supabase.'
+      };
+    }
+    
+    const logosBucket = buckets?.find(b => b.name === 'logos');
+    if (!logosBucket) {
+      return { 
+        success: false, 
+        error: 'Bucket "logos" не существует. Создайте его в Supabase Dashboard.'
+      };
+    }
+    
     const { error: uploadError } = await supabase.storage
       .from('logos')
-      .upload(fileName, file, { upsert: true });
+      .upload(fileName, file, { 
+        upsert: true,
+        cacheControl: '3600',
+        contentType: file.type
+      });
     
     if (uploadError) {
       console.error('Upload error:', uploadError);
-      return null;
+      
+      // Определяем тип ошибки
+      if (uploadError.message.includes('new row violates row-level security')) {
+        return { 
+          success: false, 
+          error: 'Ошибка прав доступа. Настройте RLS политики для bucket "logos" в Supabase.'
+        };
+      }
+      
+      return { 
+        success: false, 
+        error: `Ошибка загрузки: ${uploadError.message}`
+      };
     }
     
     const { data: { publicUrl } } = supabase.storage
       .from('logos')
       .getPublicUrl(fileName);
     
-    return publicUrl;
+    return { success: true, url: publicUrl };
   } catch (error) {
     console.error('Upload failed:', error);
-    return null;
+    return { 
+      success: false, 
+      error: 'Неизвестная ошибка при загрузке логотипа'
+    };
   }
 }
