@@ -183,7 +183,6 @@ export default function App() {
                 </h1>
                 <p className="mt-0.5 text-[11px] leading-tight text-mist-500">
                   дерево обещаний
-                  {modified && <span className="ml-1 font-semibold text-gold">· изменено</span>}
                 </p>
               </span>
             </div>
@@ -212,21 +211,41 @@ export default function App() {
             </div>
           </header>
 
-          <div className="hint-in pointer-events-none absolute bottom-4 left-4 z-20 hidden flex-col gap-2.5 rounded-xl border border-ink-700/50 bg-ink-900/80 px-4 py-3.5 backdrop-blur-md sm:flex md:bottom-5 md:left-5">
+          <div className="hint-in pointer-events-none absolute bottom-4 left-4 z-20 hidden flex-col gap-2.5 rounded-xl border border-ink-700/50 bg-ink-900/80 px-4 py-3 backdrop-blur-md sm:flex md:bottom-5 md:left-5">
+            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-mist-500">Легенда</p>
+            
             <LegendRow
-              circle={<span className="grid h-[18px] w-[18px] place-items-center rounded-full border-2 border-gold"><span className="h-[7px] w-[7px] rounded-full bg-gold/50" /></span>}
-              label="ценность"
+              circle={
+                <svg width="20" height="20" viewBox="0 0 20 20">
+                  <circle cx="10" cy="10" r="9" fill="#0d1b24" stroke="#f2b45a" strokeWidth="1.8" />
+                  <circle cx="10" cy="7" r="1.5" fill="#f2b45a" />
+                  <circle cx="7" cy="12" r="1.5" fill="#f2b45a" />
+                  <circle cx="13" cy="12" r="1.5" fill="#f2b45a" />
+                </svg>
+              }
+              label="Ценность"
             />
+            
             <LegendRow
-              circle={<span className="ml-[3px] h-3 w-3 rounded-full border-2 border-lagoon" />}
-              label="корневое обещание"
+              circle={
+                <svg width="20" height="20" viewBox="0 0 20 20">
+                  <circle cx="10" cy="10" r="9" fill="#0d1b24" stroke="#43d6b5" strokeWidth="1.8" />
+                  <rect x="7" y="7" width="6" height="6" fill="#43d6b5" opacity="0.9" />
+                </svg>
+              }
+              label="Корневое обещание"
             />
+            
             <LegendRow
-              circle={<span className="ml-[5px] h-2 w-2 rounded-full bg-sky2" />}
-              label="поддерживающее обещание"
+              circle={
+                <svg width="20" height="20" viewBox="0 0 20 20">
+                  <circle cx="10" cy="10" r="9" fill="#0d1b24" stroke="#6fb4f2" strokeWidth="1.8" />
+                  <circle cx="10" cy="10" r="3" fill="#6fb4f2" />
+                </svg>
+              }
+              label="Поддерживающее"
             />
           </div>
-
           <div className="hint-in pointer-events-none absolute bottom-4 left-1/2 z-10 hidden -translate-x-1/2 items-center gap-2 rounded-full border border-ink-700/50 bg-ink-900/75 px-4 py-2 text-[11px] text-mist-500 backdrop-blur-md md:flex">
             <Key>колесо</Key> масштаб
             <span className="text-ink-700">·</span>

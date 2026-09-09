@@ -38,7 +38,7 @@ export interface GraphBounds {
 }
 
 export const NODE_R: Record<Tier, number> = {
-  company: 184,
+  company: 400,  // Самое большое ядро
   value: 324,
   root: 120,
   support: 60,

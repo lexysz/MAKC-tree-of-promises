@@ -532,13 +532,25 @@ function NodeGlyph({
             <text
               y={r + 48}
               textAnchor="middle"
-              fontSize={21}
+              fontSize={45}
               letterSpacing="0.22em"
               fill="#93abb2"
               style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}
             >
               {short.toUpperCase()}
             </text>
+            {/* Label для компании при низком zoom */}
+            {zoom !== undefined && zoom < 0.3 && (
+              <text
+                y={r + 40}
+                textAnchor="middle"
+                fontSize={16}
+                fill={color}
+                style={{ fontFamily: "var(--font-display)", fontWeight: 600, textShadow: "0 0 8px rgba(0,0,0,0.8)" }}
+              >
+                {node.title}
+              </text>
+            )}
           </>
         )}
 
@@ -548,15 +560,50 @@ function NodeGlyph({
             <circle r={r + 30} fill="none" stroke={color} strokeWidth={3.6} strokeDasharray="9 27" opacity={0.5} className="ring-spin" />
             <circle r={r} fill="#0d1b24" stroke={color} strokeWidth={7.8} />
             <circle r={r - 21} fill="none" stroke={color} strokeWidth={3} opacity={0.22} />
-            <text
-              y={12}
-              textAnchor="middle"
-              fontSize={Math.min(50, Math.max(22, (r * 1.5) / (short.length * 0.65)))}
-              fill="#eaf4f2"
-              style={{ fontFamily: "var(--font-display)", fontWeight: 500, letterSpacing: "0.01em" }}
-            >
-              {short}
-            </text>
+            {(() => {
+              // Вычисляем размер шрифта и разбиваем текст на строки
+              const maxFontSize = 100;
+              const minFontSize = 44;
+              const fontSize = Math.min(maxFontSize, Math.max(minFontSize, (r * 3) / (short.length * 0.65)));
+              
+              // Разбиваем текст на строки если он слишком длинный
+              const maxWidth = r * 1.6; // Максимальная ширина текста
+              const words = short.split(' ');
+              const lines: string[] = [];
+              let currentLine = '';
+              
+              for (const word of words) {
+                const testLine = currentLine ? `${currentLine} ${word}` : word;
+                const testWidth = testLine.length * fontSize * 0.5; // Примерная ширина
+                
+                if (testWidth > maxWidth && currentLine) {
+                  lines.push(currentLine);
+                  currentLine = word;
+                } else {
+                  currentLine = testLine;
+                }
+              }
+              if (currentLine) lines.push(currentLine);
+              
+              // Центрируем текст вертикально
+              const lineHeight = fontSize * 1.2;
+              const totalHeight = lines.length * lineHeight;
+              const startY = -(totalHeight / 2) + lineHeight / 2;
+              
+              return lines.map((line, i) => (
+                <text
+                  key={i}
+                  y={startY + i * lineHeight}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontSize={fontSize}
+                  fill="#eaf4f2"
+                  style={{ fontFamily: "var(--font-display)", fontWeight: 500, letterSpacing: "0.01em" }}
+                >
+                  {line}
+                </text>
+              ));
+            })()}
             {/* Label для ценности при низком zoom */}
             {zoom !== undefined && zoom < 0.3 && (
               <text
@@ -610,19 +657,19 @@ function NodeGlyph({
             ) : (
               /* Fallback: текст если нет логотипа */
               (() => {
-                const maxFontSize = 22;
-                const minFontSize = 12;
-                const fontSize = Math.min(maxFontSize, Math.max(minFontSize, (r * 0.8) / (short.length * 0.55)));
+                const maxFontSize = 33;
+                const minFontSize = 18;
+                const fontSize = Math.min(maxFontSize, Math.max(minFontSize, (r * 1.2) / (short.length * 0.55)));
                 
                 if (lines.length === 1) {
                   return (
-                    <text y={7} textAnchor="middle" fontSize={fontSize} fill="#eaf4f2" style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}>
+                    <text y={7} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#eaf4f2" style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}>
                       {lines[0]}
                     </text>
                   );
                 } else {
                   return lines.map((ln, i) => (
-                    <text key={i} y={i === 0 ? -8 : 16} textAnchor="middle" fontSize={fontSize} fill="#eaf4f2" style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}>
+                    <text key={i} y={i === 0 ? -12 : 24} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#eaf4f2" style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}>
                       {ln}
                     </text>
                   ));

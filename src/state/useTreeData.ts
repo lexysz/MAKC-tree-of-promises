@@ -91,9 +91,7 @@ export function useTreeData() {
   const [modified, setModified] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const [isLocalChange, setIsLocalChange] = useState(false);
-
-  // Загрузка данных из Supabase при старте + Realtime подписка
+  // Загрузка данных из Supabase при старте (без Realtime)
   useEffect(() => {
     let isMounted = true;
     
@@ -108,43 +106,12 @@ export function useTreeData() {
       }
     }
     loadData();
-
-    // Подписка на изменения в реальном времени
-    const channel = supabase
-      .channel('tree-data-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'tree_data' },
-        async (payload) => {
-          // Игнорируем изменения, если это локальное изменение
-          if (isLocalChange) {
-            setIsLocalChange(false);
-            return;
-          }
-          
-          console.log('Realtime update received:', payload);
-          
-          // Загружаем обновлённые данные
-          const updatedData = await loadFromSupabase();
-          if (isMounted && updatedData) {
-            setData(updatedData);
-            setModified(true);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      isMounted = false;
-      supabase.removeChannel(channel);
-    };
-  }, [isLocalChange]);
+  }, []);
 
   // Сохранение в Supabase при изменении (с debounce)
   useEffect(() => {
     if (!loading) {
       const timeoutId = setTimeout(() => {
-        setIsLocalChange(true);
         saveToSupabase(data);
         saveToStorage(data); // Дублируем в localStorage для кэша
         setModified(true);
