@@ -1,0 +1,159 @@
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --font-body: "Golos Text", "Segoe UI", system-ui, sans-serif;
+
+  --color-ink-950: #071219;
+  --color-ink-900: #0a1820;
+  --color-ink-850: #0d1b24;
+  --color-ink-800: #10222c;
+  --color-ink-700: #17313d;
+  --color-mist-100: #eaf4f2;
+  --color-mist-300: #b9cdd1;
+  --color-mist-400: #93abb2;
+  --color-mist-500: #6f8b93;
+  --color-gold: #f2b45a;
+  --color-lagoon: #43d6b5;
+  --color-ember: #f2836b;
+  --color-sky2: #6fb4f2;
+  --color-leaf: #9bd356;
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--color-ink-950);
+  color: var(--color-mist-100);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+svg text { user-select: none; }
+
+@keyframes nodeIn {
+  0% { opacity: 0; transform: scale(0.3); }
+  70% { opacity: 1; }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes edgeDraw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes edgeFlow {
+  from { stroke-dashoffset: 0; }
+  to { stroke-dashoffset: -0.24; }
+}
+
+@keyframes spinSlow { to { transform: rotate(360deg); } }
+@keyframes spinSlowRev { to { transform: rotate(-360deg); } }
+
+@keyframes pulseRing {
+  0% { transform: scale(1); opacity: 0.55; }
+  70% { transform: scale(1.28); opacity: 0; }
+  100% { transform: scale(1.28); opacity: 0; }
+}
+
+@keyframes floatDust {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(26px, -34px, 0); }
+}
+
+@keyframes hintIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.node-pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nodeIn 0.6s cubic-bezier(0.22, 1.1, 0.32, 1.2) both;
+}
+
+.edge-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: edgeDraw 0.9s cubic-bezier(0.5, 0, 0.2, 1) both;
+}
+
+.edge-flow {
+  stroke-dasharray: 0.045 0.075 !important;
+  stroke-dashoffset: 0;
+  animation: edgeFlow 1.15s linear infinite !important;
+}
+
+.ring-spin, .ring-spin-rev, .pulse-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.ring-spin { animation: spinSlow 48s linear infinite; }
+.ring-spin-rev { animation: spinSlowRev 26s linear infinite; }
+.pulse-ring { animation: pulseRing 3.8s cubic-bezier(0.3, 0, 0.4, 1) infinite; }
+
+.node-g { transition: opacity 0.35s ease; }
+.edge-g { transition: opacity 0.35s ease; }
+
+.dust {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  animation: floatDust var(--dur, 16s) ease-in-out infinite alternate;
+}
+
+.hint-in { animation: hintIn 0.8s 0.4s ease both; }
+
+.panel-scroll::-webkit-scrollbar { width: 8px; }
+.panel-scroll::-webkit-scrollbar-track { background: transparent; }
+.panel-scroll::-webkit-scrollbar-thumb { background: rgba(147, 171, 178, 0.18); border-radius: 8px; }
+.panel-scroll::-webkit-scrollbar-thumb:hover { background: rgba(147, 171, 178, 0.32); }
+
+.field {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(23, 49, 61, 0.9);
+  background: rgba(13, 27, 36, 0.7);
+  padding: 9px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--color-mist-100);
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.field::placeholder { color: rgba(147, 171, 178, 0.45); }
+.field:focus {
+  border-color: rgba(242, 180, 90, 0.55);
+  background: rgba(13, 27, 36, 0.95);
+  box-shadow: 0 0 0 3px rgba(242, 180, 90, 0.12);
+}
+
+.field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(147, 171, 178, 0.75);
+}
+
+@keyframes shakeX {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-4px); }
+  40%, 60% { transform: translateX(4px); }
+}
+.shake { animation: shakeX 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+
+@keyframes rotateSpin { to { transform: rotate(360deg); } }
+.spinner { animation: rotateSpin 0.8s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
