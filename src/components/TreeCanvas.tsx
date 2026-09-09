@@ -609,6 +609,9 @@ function NodeGlyph({
                   const [r, g, b] = colorToRGB(color);
                   return (
                     <defs>
+                      <clipPath id={`clip-${node.id}`}>
+                        <circle cx="0" cy="0" r={r * 0.85} />
+                      </clipPath>
                       <filter id={`recolor-${node.id}`}>
                         <feColorMatrix
                           type="matrix"
@@ -623,11 +626,12 @@ function NodeGlyph({
                 })()}
                 <image
                   href={companyLogo}
-                  x={-r * 0.5}
-                  y={-r * 0.5}
-                  width={r}
-                  height={r}
+                  x={-r * 0.85}
+                  y={-r * 0.85}
+                  width={r * 1.7}
+                  height={r * 1.7}
                   preserveAspectRatio="xMidYMid meet"
+                  clipPath={`url(#clip-${node.id})`}
                   filter={`url(#recolor-${node.id})`}
                   opacity={0.9}
                 />

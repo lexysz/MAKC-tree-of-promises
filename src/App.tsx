@@ -230,7 +230,19 @@ export default function App() {
               circle={
                 <svg width="20" height="20" viewBox="0 0 20 20">
                   <circle cx="10" cy="10" r="9" fill="#0d1b24" stroke="#43d6b5" strokeWidth="1.8" />
-                  <rect x="7" y="7" width="6" height="6" fill="#43d6b5" opacity="0.9" />
+                  {data.company.logo ? (
+                    <image
+                      href={data.company.logo}
+                      x="4"
+                      y="4"
+                      width="12"
+                      height="12"
+                      preserveAspectRatio="xMidYMid meet"
+                      clipPath="circle(6px at 10px 10px)"
+                    />
+                  ) : (
+                    <rect x="7" y="7" width="6" height="6" fill="#43d6b5" opacity="0.9" />
+                  )}
                 </svg>
               }
               label="Корневое обещание"
