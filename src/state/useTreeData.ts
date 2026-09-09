@@ -39,6 +39,7 @@ function cloneTree(data: TreeData): TreeData {
 // Supabase функции
 async function loadFromSupabase(): Promise<TreeData | null> {
   try {
+    console.log('📥 [loadFromSupabase] Загрузка данных из Supabase...');
     const { data, error } = await supabase
       .from('tree_data')
       .select('data')
@@ -46,13 +47,19 @@ async function loadFromSupabase(): Promise<TreeData | null> {
       .limit(1)
       .single();
 
-    if (error || !data) return null;
+    if (error || !data) {
+      console.log('❌ [loadFromSupabase] Данные не найдены:', error);
+      return null;
+    }
     
     const treeData = data.data as TreeData;
+    console.log('✅ [loadFromSupabase] Данные загружены');
+    console.log('🖼️ [loadFromSupabase] Логотип:', treeData.company?.logo || 'не установлен');
+    
     treeData.values = treeData.values.map((v, i) => ({ ...v, color: getValueColor(i) }));
     return treeData;
   } catch (error) {
-    console.error('Error loading from Supabase:', error);
+    console.error('❌ [loadFromSupabase] Ошибка загрузки:', error);
     return null;
   }
 }

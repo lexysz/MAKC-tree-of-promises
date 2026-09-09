@@ -325,6 +325,10 @@ function NodeEditor({ node, onSave, onUpdateCompany }: { node: AnyDef; onSave: (
       if (result.success && result.url) {
         console.log('✅✅ [handleLogoUpload] Логотип установлен:', result.url);
         setLogo(result.url);
+        // Автоматически сохраняем логотип в данные компании
+        if (isCompany) {
+          onUpdateCompany({ logo: result.url });
+        }
       } else {
         console.error('❌ [handleLogoUpload] Ошибка:', result.error);
         alert(result.error || "Не удалось загрузить логотип");
