@@ -14,7 +14,6 @@ export const supabase = createClient(
 
 // Загрузка логотипа в Supabase Storage
 export async function uploadLogo(file: File): Promise<{ success: boolean; url?: string; error?: string }> {
-  alert('🚀 Функция uploadLogo вызвана!');
   try {
     console.log('🔍 [uploadLogo] Начало загрузки логотипа...');
     console.log('📁 [uploadLogo] Файл:', file.name, 'Размер:', file.size, 'Тип:', file.type);
@@ -32,7 +31,9 @@ export async function uploadLogo(file: File): Promise<{ success: boolean; url?: 
     }
 
     const fileExt = file.name.split('.').pop();
-    const fileName = `company-logo.${fileExt}`;
+    // Добавляем timestamp для уникальности имени файла (предотвращает кэширование)
+    const timestamp = Date.now();
+    const fileName = `company-logo-${timestamp}.${fileExt}`;
     console.log('📝 [uploadLogo] Имя файла для загрузки:', fileName);
     
     // Проверяем существование bucket
