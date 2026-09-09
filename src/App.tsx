@@ -229,16 +229,21 @@ export default function App() {
             <LegendRow
               circle={
                 <svg width="30" height="30" viewBox="0 0 30 30">
+                  <defs>
+                    <clipPath id="legend-logo-clip">
+                      <circle cx="15" cy="15" r="12" />
+                    </clipPath>
+                  </defs>
                   <circle cx="15" cy="15" r="13.5" fill="#0d1b24" stroke="#43d6b5" strokeWidth="2.7" />
                   {data.company.logo ? (
                     <image
                       href={data.company.logo}
-                      x="6"
-                      y="6"
-                      width="18"
-                      height="18"
+                      x="3"
+                      y="3"
+                      width="24"
+                      height="24"
                       preserveAspectRatio="xMidYMid meet"
-                      clipPath="circle(9px at 15px 15px)"
+                      clipPath="url(#legend-logo-clip)"
                     />
                   ) : (
                     <rect x="10.5" y="10.5" width="9" height="9" fill="#43d6b5" opacity="0.9" />
