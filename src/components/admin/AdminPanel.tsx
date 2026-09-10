@@ -304,41 +304,25 @@ function NodeEditor({ node, onSave, onUpdateCompany }: { node: AnyDef; onSave: (
   const [uploading, setUploading] = useState(false);
   
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    alert('✅ Функция загрузки вызвана!');
-    console.log('🎯 [handleLogoUpload] Вызвана функция загрузки логотипа');
     const file = e.target.files?.[0];
-    if (!file) {
-      console.log('❌ [handleLogoUpload] Файл не выбран');
-      alert('❌ Файл не выбран');
-      return;
-    }
-    alert(`✅ Файл выбран: ${file.name}`);
+    if (!file) return;
     
-    console.log('📁 [handleLogoUpload] Файл:', file.name);
     setUploading(true);
     try {
-      console.log('📤 [handleLogoUpload] Вызов uploadLogo...');
-      // Загружаем в Supabase Storage
       const result = await uploadLogo(file);
-      console.log('📥 [handleLogoUpload] Результат:', result);
       
       if (result.success && result.url) {
-        console.log('✅✅ [handleLogoUpload] Логотип установлен:', result.url);
         setLogo(result.url);
-        // Автоматически сохраняем логотип в данные компании
         if (isCompany) {
           onUpdateCompany({ logo: result.url });
         }
       } else {
-        console.error('❌ [handleLogoUpload] Ошибка:', result.error);
         alert(result.error || "Не удалось загрузить логотип");
       }
     } catch (error) {
-      console.error('❌ [handleLogoUpload] Исключение:', error);
       alert("Произошла ошибка при загрузке логотипа");
     } finally {
       setUploading(false);
-      console.log('🏁 [handleLogoUpload] Завершено');
     }
   };
 
@@ -348,11 +332,16 @@ function NodeEditor({ node, onSave, onUpdateCompany }: { node: AnyDef; onSave: (
     e.preventDefault();
     if (!dirty) return;
     if (isCompany) {
-      onUpdateCompany({ title: title.trim() || node.title, short: short.trim() || node.short || title.trim(), description: description.trim(), logo });
+      onUpdateCompany({ 
+        title: title.trim() || node.title, 
+        short: short.trim() || title.trim() || node.short, 
+        description: description.trim(), 
+        logo 
+      });
     } else {
       onSave({
         title: title.trim() || node.title,
-        ...(hasShort ? { short: short.trim() || node.short || title.trim() } : {}),
+        ...(hasShort ? { short: short.trim() || title.trim() || node.short } : {}),
         description: description.trim(),
         ...(isPromise ? { who: who.trim(), toWhom: toWhom.trim(), metrics: metrics.trim() } : {}),
       });
