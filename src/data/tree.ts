@@ -35,21 +35,9 @@ export interface ValueDef {
   promises: RootDef[];
 }
 
-// НОВОЕ: интерфейс для общего обещания (инфраструктура)
-export interface GeneralDef {
-  id: string;
-  title: string;
-  short: string;
-  description: string;
-  who?: string;      // подразделение, которое даёт обещание
-  toWhom?: string;   // внутренний клиент
-  metrics?: string;  // метрика успешности
-}
-
 export interface TreeData {
   company: CompanyDef;
   values: ValueDef[];
-  generalPromises?: GeneralDef[];  // НОВОЕ поле
   customPositions?: Record<string, { x: number; y: number }>;
 }
 
@@ -73,56 +61,6 @@ export const COMPANY: CompanyDef = {
   short: "КОМПАНИЯ",
   description: "Ядро дерева обещаний — миссия и ценности компании.",
 };
-
-// НОВОЕ: Общие обещания (инфраструктура компании)
-// Они не отображаются на графе, но видны при клике на ядро
-export const GENERAL_PROMISES: GeneralDef[] = [
-  {
-    id: "g-salary",
-    title: "Зарплата начисляется без ошибок",
-    short: "Зарплата",
-    description: "Сотрудники получают зарплату вовремя и без ошибок в начислениях",
-    who: "Бухгалтерия",
-    toWhom: "Все сотрудники",
-    metrics: "0 ошибок в месяц",
-  },
-  {
-    id: "g-it-uptime",
-    title: "ИТ-системы работают 24/7",
-    short: "ИТ 24/7",
-    description: "Внутренние системы компании доступны круглосуточно",
-    who: "DevOps",
-    toWhom: "Все сотрудники",
-    metrics: "Аптайм ≥ 99.9%",
-  },
-  {
-    id: "g-legal",
-    title: "Договоры согласовываются за 1 день",
-    short: "Договоры",
-    description: "Юридический отдел согласовывает документы в течение одного рабочего дня",
-    who: "Юристы",
-    toWhom: "Все подразделения",
-    metrics: "Среднее время ≤ 24ч",
-  },
-  {
-    id: "g-hr-onboarding",
-    title: "Новые сотрудники выходят за 2 недели",
-    short: "Найм",
-    description: "HR обеспечивает быстрый выход новых сотрудников на работу",
-    who: "HR",
-    toWhom: "Все руководители",
-    metrics: "Средний срок ≤ 14 дней",
-  },
-  {
-    id: "g-office",
-    title: "Офис всегда чистый и комфортный",
-    short: "Офис",
-    description: "Рабочее пространство поддерживается в чистоте и порядке",
-    who: "АХО",
-    toWhom: "Все сотрудники",
-    metrics: "Уборка ежедневно",
-  },
-];
 
 export const VALUES: ValueDef[] = [
   {
