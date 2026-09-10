@@ -30,8 +30,6 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [view, setView] = useState<View>("tree");
   const [session, setSession] = useState<Session | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [showSearchResults, setShowSearchResults] = useState(false);
   const [authChecking, setAuthChecking] = useState(true);
   const canvasRef = useRef<TreeCanvasHandle>(null);
   
@@ -87,18 +85,6 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [view]);
-
-  const searchResults = useMemo(() => {
-    if (!searchQuery.trim()) return [];
-    const q = searchQuery.toLowerCase();
-    return graph.nodes.filter((n) => {
-      if (n.tier === "company") return false;
-      const inTitle = n.title.toLowerCase().includes(q);
-      const inDesc = n.description.toLowerCase().includes(q);
-      const inWho = n.who?.toLowerCase().includes(q) ?? false;
-      return inTitle || inDesc || inWho;
-    }).slice(0, 15);
-  }, [searchQuery, graph.nodes]);
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
@@ -210,74 +196,6 @@ export default function App() {
                 <Stat n={counts.support} label="поддерживающих" color="#6fb4f2" />
               </div>
 
-              <div className="hint-in pointer-events-auto relative hidden lg:block">
-                <div className="flex items-center rounded-xl border border-ink-700/50 bg-ink-900/80 backdrop-blur-md px-3 py-3">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-mist-500">
-                    <circle cx="11" cy="11" r="8"></circle>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                  </svg>
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => {
-                      setSearchQuery(e.target.value);
-                      setShowSearchResults(true);
-                    }}
-                    onFocus={() => setShowSearchResults(true)}
-                    onBlur={() => setTimeout(() => setShowSearchResults(false), 150)}
-                    placeholder="Поиск обещаний или подразделения..."
-                    className="w-56 bg-transparent pl-2 text-[13px] text-mist-100 placeholder-mist-500 focus:outline-none"
-                  />
-                  {searchQuery && (
-                    <button
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => { setSearchQuery(""); setShowSearchResults(false); }}
-                      className="ml-2 text-mist-500 hover:text-mist-300"
-                    >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
-                      </svg>
-                    </button>
-                  )}
-                </div>
-                {showSearchResults && searchResults.length > 0 && (
-                  <div className="absolute right-0 top-full mt-2 w-80 max-h-96 overflow-y-auto rounded-xl border border-ink-700/50 bg-ink-900/95 p-2 shadow-xl backdrop-blur-md z-30">
-                    {searchResults.map((node) => (
-                      <button
-                        key={node.id}
-                        className="flex w-full flex-col items-start gap-1 rounded-lg px-3 py-2 text-left transition-colors hover:bg-ink-800/70"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          navigate(node.id);
-                          setSearchQuery("");
-                          setShowSearchResults(false);
-                        }}
-                      >
-                        <span className="text-[13px] font-medium text-mist-100 truncate w-full">{node.title}</span>
-                        <div className="flex items-center gap-2 text-[11px] text-mist-400 w-full">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: node.color }}></span>
-                          <span>
-                            {node.tier === "value" ? "Ценность" : node.tier === "root" ? "Корневое" : "Поддерживающее"}
-                          </span>
-                          {node.who && (
-                            <>
-                              <span>·</span>
-                              <span className="font-medium text-mist-300 truncate">{node.who}</span>
-                            </>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {showSearchResults && searchQuery && searchResults.length === 0 && (
-                  <div className="absolute right-0 top-full mt-2 w-80 rounded-xl border border-ink-700/50 bg-ink-900/95 p-4 text-center text-[13px] text-mist-400 shadow-xl backdrop-blur-md z-30">
-                    Ничего не найдено
-                  </div>
-                )}
-              </div>
-
               <button
                 onClick={() => setView("admin")}
                 title="Админ-панель"
@@ -381,15 +299,14 @@ export default function App() {
             </ZoomBtn>
           </div>
 
-         <DetailPanel
-  node={selectedNode}
-  parent={selectedNode?.parentId ? byId.get(selectedNode.parentId) ?? null : null}
-  children={selectedNode ? selectedNode.childrenIds.map((id) => byId.get(id)!).filter(Boolean) : []}
-  valueNode={selectedNode ? byId.get(selectedNode.familyId) ?? null : null}
-  generalPromises={data.generalPromises || []}
-  onClose={() => setSelectedId(null)}
-  onNavigate={navigate}
-           />
+          <DetailPanel
+            node={selectedNode}
+            parent={selectedNode?.parentId ? byId.get(selectedNode.parentId) ?? null : null}
+            children={selectedNode ? selectedNode.childrenIds.map((id) => byId.get(id)!).filter(Boolean) : []}
+            valueNode={selectedNode ? byId.get(selectedNode.familyId) ?? null : null}
+            onClose={() => setSelectedId(null)}
+            onNavigate={navigate}
+          />
         </>
       )}
     </div>
