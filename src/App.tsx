@@ -381,14 +381,15 @@ export default function App() {
             </ZoomBtn>
           </div>
 
-          <DetailPanel
-            node={selectedNode}
-            parent={selectedNode?.parentId ? byId.get(selectedNode.parentId) ?? null : null}
-            children={selectedNode ? selectedNode.childrenIds.map((id) => byId.get(id)!).filter(Boolean) : []}
-            valueNode={selectedNode ? byId.get(selectedNode.familyId) ?? null : null}
-            onClose={() => setSelectedId(null)}
-            onNavigate={navigate}
-          />
+         <DetailPanel
+  node={selectedNode}
+  parent={selectedNode?.parentId ? byId.get(selectedNode.parentId) ?? null : null}
+  children={selectedNode ? selectedNode.childrenIds.map((id) => byId.get(id)!).filter(Boolean) : []}
+  valueNode={selectedNode ? byId.get(selectedNode.familyId) ?? null : null}
+  generalPromises={data.generalPromises || []}
+  onClose={() => setSelectedId(null)}
+  onNavigate={navigate}
+           />
         </>
       )}
     </div>
