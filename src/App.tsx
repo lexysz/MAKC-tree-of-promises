@@ -554,23 +554,29 @@ export default function App() {
     );
   }
 
-  if (view === "admin") {
-    return authed ? (
-      <AdminPanel
-        data={data}
-        modified={modified}
-        onBack={() => setView("tree")}
-        onLogout={async () => await supabase.auth.signOut()}
-        onSave={updateNode}
-        onUpdateCompany={updateCompany}
-        onApplyImport={(r) => replaceValues(r.values)}
-        onReset={reset}
-        onResetAllPositions={resetAllPositions}
-      />
-    ) : (
-      <AdminLogin onSuccess={() => {}} onBack={() => setView("tree")} />
-    );
-  }
+if (view === "admin") {
+  return (
+    <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
+      <BackgroundGradient />
+      <DustParticles />
+      {authed ? (
+        <AdminPanel
+          data={data}
+          modified={modified}
+          onBack={() => setView("tree")}
+          onLogout={async () => await supabase.auth.signOut()}
+          onSave={updateNode}
+          onUpdateCompany={updateCompany}
+          onApplyImport={(r) => replaceValues(r.values)}
+          onReset={reset}
+          onResetAllPositions={resetAllPositions}
+        />
+      ) : (
+        <AdminLogin onSuccess={() => {}} onBack={() => setView("tree")} />
+      )}
+    </div>
+  );
+}
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
