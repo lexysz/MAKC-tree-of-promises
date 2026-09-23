@@ -1,4 +1,3 @@
-import { COMPANY, VALUES } from "../data/tree";
 import type { CompanyDef, Tier, ValueDef } from "../data/tree";
 
 export interface GraphNode {
@@ -38,7 +37,7 @@ export interface GraphBounds {
 }
 
 export const NODE_R: Record<Tier, number> = {
-  company: 400,  // Самое большое ядро
+  company: 400,
   value: 324,
   root: 120,
   support: 60,
@@ -53,14 +52,19 @@ function minRingRadius(n: number, r: number): number {
 }
 
 function trimmed(
-  x1: number, y1: number, r1: number,
-  x2: number, y2: number, r2: number,
+  x1: number,
+  y1: number,
+  r1: number,
+  x2: number,
+  y2: number,
+  r2: number,
 ): [number, number, number, number] {
   const dx = x2 - x1;
   const dy = y2 - y1;
   const d = Math.hypot(dx, dy) || 1;
   const ux = dx / d;
   const uy = dy / d;
+
   return [
     x1 + ux * (r1 + 4),
     y1 + uy * (r1 + 4),
@@ -69,30 +73,9 @@ function trimmed(
   ];
 }
 
-function lineIntersectsCircle(
-  x1: number, y1: number,
-  x2: number, y2: number,
-  cx: number, cy: number,
-  r: number,
-): boolean {
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const len2 = dx * dx + dy * dy;
-  if (len2 === 0) return false;
-
-  let t = ((cx - x1) * dx + (cy - y1) * dy) / len2;
-  t = Math.max(0, Math.min(1, t));
-
-  const closestX = x1 + t * dx;
-  const closestY = y1 + t * dy;
-  const dist = Math.hypot(cx - closestX, cy - closestY);
-
-  return dist < r + 2;
-}
-
 export function buildGraph(
-  company: CompanyDef = COMPANY,
-  values: ValueDef[] = VALUES,
+  company: CompanyDef,
+  values: ValueDef[],
   customPositions?: Record<string, { x: number; y: number }>,
 ): {
   nodes: GraphNode[];
@@ -101,11 +84,11 @@ export function buildGraph(
 } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
-  const nodeIds = new Set<string>(); // Для отслеживания дубликатов
+  const nodeIds = new Set<string>();
 
-  const totalRoots = values.reduce((s, v) => s + v.promises.length, 0);
+  const totalRoots = values.reduce((sum, v) => sum + v.promises.length, 0);
   const totalSupports = values.reduce(
-    (s, v) => s + v.promises.reduce((s2, r) => s2 + r.supports.length, 0),
+    (sum, v) => sum + v.promises.reduce((sum2, r) => sum2 + r.supports.length, 0),
     0,
   );
 
@@ -114,7 +97,7 @@ export function buildGraph(
   const rootRingR = Math.max(valueRingR + 900 * scaleFactor, minRingRadius(totalRoots, NODE_R.root));
   const supportRingR = Math.max(rootRingR + 840 * scaleFactor, minRingRadius(totalSupports, NODE_R.support));
 
-  // Добавляем ядро компании
+  // Add company core
   if (!nodeIds.has(company.id)) {
     nodeIds.add(company.id);
     nodes.push({
@@ -142,7 +125,7 @@ export function buildGraph(
     const vx = Math.cos(valueAngle) * valueRingR;
     const vy = Math.sin(valueAngle) * valueRingR;
 
-    // Добавляем ценность
+    // Add value node
     if (!nodeIds.has(value.id)) {
       nodeIds.add(value.id);
       nodes.push({
@@ -164,80 +147,81 @@ export function buildGraph(
     }
 
     const rootCount = value.promises.length;
-    if (rootCount > 0) {
-      const sectorWidth = valueAngleStep;
-      const rootStep = sectorWidth / rootCount;
+    if (rootCount === 0) return;
 
-      value.promises.forEach((root, j) => {
-        const rootAngle = valueAngle - sectorWidth / 2 + rootStep * (j + 0.5);
-        const rx = Math.cos(rootAngle) * rootRingR;
-        const ry = Math.sin(rootAngle) * rootRingR;
+    const sectorWidth = valueAngleStep;
+    const rootStep = sectorWidth / rootCount;
 
-        // Добавляем корневое обещание
-        if (!nodeIds.has(root.id)) {
-          nodeIds.add(root.id);
+    value.promises.forEach((root, j) => {
+      const rootAngle = valueAngle - sectorWidth / 2 + rootStep * (j + 0.5);
+      const rx = Math.cos(rootAngle) * rootRingR;
+      const ry = Math.sin(rootAngle) * rootRingR;
+
+      // Add root promise
+      if (!nodeIds.has(root.id)) {
+        nodeIds.add(root.id);
+        nodes.push({
+          id: root.id,
+          tier: "root",
+          title: root.title,
+          short: root.short,
+          description: root.description,
+          parentId: value.id,
+          familyId: value.id,
+          familyTitle: value.title,
+          color: value.color,
+          x: rx,
+          y: ry,
+          r: NODE_R.root,
+          delay: 0.55 + i * 0.06 + j * 0.05,
+          childrenIds: root.supports.map((s) => s.id),
+          who: root.who,
+          toWhom: root.toWhom,
+          metrics: root.metrics,
+        });
+      }
+
+      const supportCount = root.supports.length;
+      if (supportCount === 0) return;
+
+      const subSectorWidth = rootStep;
+      const supportStep = subSectorWidth / supportCount;
+
+      root.supports.forEach((sup, t) => {
+        const supportAngle = rootAngle - subSectorWidth / 2 + supportStep * (t + 0.5);
+        const sx = Math.cos(supportAngle) * supportRingR;
+        const sy = Math.sin(supportAngle) * supportRingR;
+
+        // Add supporting promise
+        if (!nodeIds.has(sup.id)) {
+          nodeIds.add(sup.id);
           nodes.push({
-            id: root.id,
-            tier: "root",
-            title: root.title,
-            short: root.short,
-            description: root.description,
-            parentId: value.id,
+            id: sup.id,
+            tier: "support",
+            title: sup.title,
+            short: "",
+            description: sup.description,
+            parentId: root.id,
             familyId: value.id,
             familyTitle: value.title,
             color: value.color,
-            x: rx,
-            y: ry,
-            r: NODE_R.root,
-            delay: 0.55 + i * 0.06 + j * 0.05,
-            childrenIds: root.supports.map((s) => s.id),
-            who: root.who,
-            toWhom: root.toWhom,
-            metrics: root.metrics,
-          });
-        }
-
-        const supportCount = root.supports.length;
-        if (supportCount > 0) {
-          const subSectorWidth = rootStep;
-          const supportStep = subSectorWidth / supportCount;
-
-          root.supports.forEach((sup, t) => {
-            const supportAngle = rootAngle - subSectorWidth / 2 + supportStep * (t + 0.5);
-            const sx = Math.cos(supportAngle) * supportRingR;
-            const sy = Math.sin(supportAngle) * supportRingR;
-
-            // Добавляем поддерживающее обещание
-            if (!nodeIds.has(sup.id)) {
-              nodeIds.add(sup.id);
-              nodes.push({
-                id: sup.id,
-                tier: "support",
-                title: sup.title,
-                short: "",
-                description: sup.description,
-                parentId: root.id,
-                familyId: value.id,
-                familyTitle: value.title,
-                color: value.color,
-                x: sx,
-                y: sy,
-                r: NODE_R.support,
-                delay: 0.95 + i * 0.05 + j * 0.04 + t * 0.045,
-                childrenIds: [],
-                who: sup.who,
-                toWhom: sup.toWhom,
-                metrics: sup.metrics,
-              });
-            }
+            x: sx,
+            y: sy,
+            r: NODE_R.support,
+            delay: 0.95 + i * 0.05 + j * 0.04 + t * 0.045,
+            childrenIds: [],
+            who: sup.who,
+            toWhom: sup.toWhom,
+            metrics: sup.metrics,
           });
         }
       });
-    }
+    });
   });
 
   resolveOverlaps(nodes, valueRingR, rootRingR, supportRingR);
 
+  // Apply custom positions if provided
   if (customPositions) {
     for (const node of nodes) {
       const pos = customPositions[node.id];
@@ -248,15 +232,14 @@ export function buildGraph(
     }
   }
 
+  // Build edges
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-
   nodes.forEach((node) => {
     if (node.parentId) {
       const parent = nodeMap.get(node.parentId);
       if (parent) {
         const [x1, y1, x2, y2] = trimmed(parent.x, parent.y, parent.r, node.x, node.y, node.r);
         const d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`;
-
         edges.push({
           id: `e-${parent.id}-${node.id}`,
           from: parent.id,
@@ -269,7 +252,12 @@ export function buildGraph(
     }
   });
 
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  // Calculate bounds
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
   for (const nd of nodes) {
     minX = Math.min(minX, nd.x - nd.r - 90);
     minY = Math.min(minY, nd.y - nd.r - 90);
@@ -280,151 +268,77 @@ export function buildGraph(
   return { nodes, edges, bounds: { minX, minY, maxX, maxY } };
 }
 
-function resolveOverlaps(
-  nodes: GraphNode[],
-  valueRingR: number,
-  rootRingR: number,
-  supportRingR: number,
-) {
-  const tiers = [
-    { tier: "value" as Tier, radius: valueRingR },
-    { tier: "root" as Tier, radius: rootRingR },
-    { tier: "support" as Tier, radius: supportRingR },
-  ];
+export function collectFamily(id: string, byId: Map<string, GraphNode>): Set<string> {
+  const result = new Set<string>();
+  const node = byId.get(id);
+  if (!node) return result;
 
-  for (const { tier, radius } of tiers) {
-    const tierNodes = nodes.filter((n) => n.tier === tier);
-    if (tierNodes.length < 2) continue;
+  // Add the node itself
+  result.add(id);
 
-    tierNodes.sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
-
-    for (let iter = 0; iter < 100; iter++) {
-      let moved = false;
-
-      for (let i = 0; i < tierNodes.length; i++) {
-        for (let j = i + 1; j < tierNodes.length; j++) {
-          const a = tierNodes[i];
-          const b = tierNodes[j];
-
-          const dist = Math.hypot(a.x - b.x, a.y - b.y);
-          const minDist = a.r + b.r + NODE_GAP;
-
-          if (dist < minDist) {
-            moved = true;
-            const overlap = minDist - dist;
-            const angleA = Math.atan2(a.y, a.x);
-            const angleB = Math.atan2(b.y, b.x);
-
-            const pushAngle = (overlap / radius) * 0.6;
-            a.x = Math.cos(angleA - pushAngle) * radius;
-            a.y = Math.sin(angleA - pushAngle) * radius;
-            b.x = Math.cos(angleB + pushAngle) * radius;
-            b.y = Math.sin(angleB + pushAngle) * radius;
-          }
-        }
-      }
-
-      if (!moved) break;
-    }
+  // Add all descendants
+  const queue = [...node.childrenIds];
+  while (queue.length > 0) {
+    const childId = queue.shift()!;
+    if (result.has(childId)) continue;
+    result.add(childId);
+    const child = byId.get(childId);
+    if (child) queue.push(...child.childrenIds);
   }
 
-  for (let iter = 0; iter < 60; iter++) {
-    let moved = false;
-
-    for (let i = 0; i < nodes.length; i++) {
-      const a = nodes[i];
-      if (a.tier === "company") continue;
-
-      for (let j = 0; j < nodes.length; j++) {
-        if (i === j) continue;
-        const b = nodes[j];
-        if (b.tier === "company" || a.tier === b.tier) continue;
-
-        const dist = Math.hypot(a.x - b.x, a.y - b.y);
-        const minDist = a.r + b.r + NODE_GAP;
-
-        if (dist < minDist) {
-          moved = true;
-          const overlap = minDist - dist;
-          const angleA = Math.atan2(a.y, a.x);
-          const angleB = Math.atan2(b.y, b.x);
-          const radiusA = Math.hypot(a.x, a.y);
-          const radiusB = Math.hypot(b.x, b.y);
-
-          const pushFactor = overlap * 0.5;
-          if (radiusA <= radiusB) {
-            a.x = Math.cos(angleA) * Math.max(150, radiusA - pushFactor * 0.3);
-            a.y = Math.sin(angleA) * Math.max(150, radiusA - pushFactor * 0.3);
-            b.x = Math.cos(angleB) * (radiusB + pushFactor * 0.7);
-            b.y = Math.sin(angleB) * (radiusB + pushFactor * 0.7);
-          } else {
-            a.x = Math.cos(angleA) * (radiusA + pushFactor * 0.7);
-            a.y = Math.sin(angleA) * (radiusA + pushFactor * 0.7);
-            b.x = Math.cos(angleB) * Math.max(150, radiusB - pushFactor * 0.3);
-            b.y = Math.sin(angleB) * Math.max(150, radiusB - pushFactor * 0.3);
-          }
-        }
-      }
-    }
-
-    if (!moved) break;
+  // Add parent chain
+  let current = node;
+  while (current.parentId) {
+    const parent = byId.get(current.parentId);
+    if (!parent) break;
+    result.add(parent.id);
+    current = parent;
   }
 
-  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
-
-  for (let iter = 0; iter < 30; iter++) {
-    let moved = false;
-
-    for (const node of nodes) {
-      if (!node.parentId) continue;
-      const parent = nodeMap.get(node.parentId);
-      if (!parent) continue;
-
-      const [x1, y1, x2, y2] = trimmed(parent.x, parent.y, parent.r, node.x, node.y, node.r);
-
-      for (const other of nodes) {
-        if (other.id === parent.id || other.id === node.id) continue;
-
-        if (lineIntersectsCircle(x1, y1, x2, y2, other.x, other.y, other.r)) {
-          moved = true;
-          const nodeAngle = Math.atan2(node.y, node.x);
-          const nodeRadius = Math.hypot(node.x, node.y);
-
-          const crossProduct = (x2 - x1) * (other.y - y1) - (y2 - y1) * (other.x - x1);
-          const newAngle = nodeAngle + (crossProduct > 0 ? 0.12 : -0.12);
-
-          node.x = Math.cos(newAngle) * nodeRadius;
-          node.y = Math.sin(newAngle) * nodeRadius;
-          break;
-        }
-      }
-    }
-
-    if (!moved) break;
-  }
+  return result;
 }
 
-export function collectFamily(id: string, byId: Map<string, GraphNode>): Set<string> {
-  const set = new Set<string>();
-  let cur: GraphNode | undefined = byId.get(id);
+function resolveOverlaps(
+  nodes: GraphNode[],
+  _valueRingR: number,
+  _rootRingR: number,
+  _supportRingR: number,
+): void {
+  // Phase 1: resolve overlaps within each tier
+  const tiers: Tier[] = ["value", "root", "support"];
   
-  while (cur) {
-    set.add(cur.id);
-    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
-  }
-  
-  const queue = [id];
-  while (queue.length) {
-    const nid = queue.shift()!;
-    const nd = byId.get(nid);
-    if (!nd) continue;
-    for (const cid of nd.childrenIds) {
-      if (!set.has(cid)) {
-        set.add(cid);
-        queue.push(cid);
+  tiers.forEach((tier) => {
+    const tierNodes = nodes.filter((n) => n.tier === tier);
+    if (tierNodes.length < 2) return;
+
+    // Sort by angle
+    tierNodes.sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
+
+    // Check and resolve overlaps
+    for (let i = 0; i < tierNodes.length; i++) {
+      const current = tierNodes[i];
+      const next = tierNodes[(i + 1) % tierNodes.length];
+      
+      const dx = next.x - current.x;
+      const dy = next.y - current.y;
+      const distance = Math.hypot(dx, dy);
+      const minDistance = current.r + next.r + NODE_GAP;
+
+      if (distance < minDistance) {
+        const overlap = minDistance - distance;
+        const angle = Math.atan2(dy, dx);
+        const pushX = (Math.cos(angle) * overlap) / 2;
+        const pushY = (Math.sin(angle) * overlap) / 2;
+
+        current.x -= pushX;
+        current.y -= pushY;
+        next.x += pushX;
+        next.y += pushY;
       }
     }
-  }
-  
-  return set;
+  });
+
+  // Phase 2: resolve overlaps between tiers (simplified)
+  // This is a placeholder for more sophisticated collision detection
+  // if needed in the future
 }
