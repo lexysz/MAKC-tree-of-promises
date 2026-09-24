@@ -17,11 +17,14 @@ export interface NodePatch {
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-/**
- * Применяет поля из patch к целевому объекту, игнорируя undefined.
 /** Поля, в которых пустая строка означает «значения нет» и хранится как undefined */
 const OPTIONAL_TEXT_FIELDS = new Set(["who", "toWhom", "metrics"]);
 
+/**
+ * Применяет поля из patch к целевому объекту, игнорируя undefined.
+ * Пустая строка превращается в undefined ТОЛЬКО для опциональных полей —
+ * обязательные (title, short, description) всегда остаются строками.
+ */
 function applyPatch<T extends object>(target: T, patch: Partial<T>): void {
   (Object.keys(patch) as Array<keyof T>).forEach((key) => {
     const value = patch[key];
@@ -31,28 +34,47 @@ function applyPatch<T extends object>(target: T, patch: Partial<T>): void {
     target[key] = (isEmptyOptional ? undefined : value) as T[keyof T];
   });
 }
+
+function cloneTree(data: TreeData): TreeData {
+  return structuredClone(data);
+}
+
 /**
- * Восстанавливает обязательные строковые поля, если в данных оказался undefined
- * (защищает от записей, сохранённых предыдущими версиями приложения).
+ * Полная нормализация дерева: гарантирует, что все обязательные поля — строки,
+ * а все коллекции — массивы. Защищает от данных, испорченных старыми версиями
+ * приложения или некорректным импортом (иначе for...of упадёт с
+ * «false is not iterable» / «undefined is not iterable»).
  */
 function sanitizeTree(data: TreeData): TreeData {
-  const str = (value: string | undefined, fallback = ""): string =>
+  const str = (value: unknown, fallback = ""): string =>
     typeof value === "string" ? value : fallback;
+
+  if (!data || typeof data !== "object") return createEmptyTree();
+  if (!data.company || typeof data.company !== "object") {
+    data.company = createEmptyTree().company;
+  }
+  if (!Array.isArray(data.values)) data.values = [];
 
   data.company.title = str(data.company.title);
   data.company.short = str(data.company.short);
   data.company.description = str(data.company.description);
 
+  data.values = data.values.filter((v) => v && typeof v === "object");
   for (const value of data.values) {
     value.title = str(value.title);
     value.short = str(value.short);
     value.description = str(value.description);
+    value.color = str(value.color, getValueColor(0));
+    if (!Array.isArray(value.promises)) value.promises = [];
 
+    value.promises = value.promises.filter((r) => r && typeof r === "object");
     for (const root of value.promises) {
       root.title = str(root.title);
       root.short = str(root.short, root.title);
       root.description = str(root.description, root.title);
+      if (!Array.isArray(root.supports)) root.supports = [];
 
+      root.supports = root.supports.filter((s) => s && typeof s === "object");
       for (const support of root.supports) {
         support.title = str(support.title);
         support.description = str(support.description, support.title);
@@ -62,6 +84,7 @@ function sanitizeTree(data: TreeData): TreeData {
 
   return data;
 }
+
 /** Находит узел в дереве по ID. */
 function findNode(data: TreeData, id: string) {
   if (data.company.id === id) return data.company;
@@ -90,11 +113,10 @@ function reassignColors(data: TreeData): TreeData {
 
 function loadFromStorage(): TreeData | null {
   try {
-       const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     return reassignColors(sanitizeTree(JSON.parse(raw) as TreeData));
   } catch {
-    // localStorage недоступен или повреждён
     return null;
   }
 }
@@ -144,7 +166,7 @@ async function saveToSupabase(data: TreeData): Promise<void> {
   }
 }
 
-// ─── Hook ────────────────────────────────────────────────────────
+// ─── Hook ───────────────────────────────────────────────────────
 
 export function useTreeData() {
   const [data, setData] = useState<TreeData>(
@@ -204,7 +226,10 @@ export function useTreeData() {
   const replaceValues = useCallback((values: ValueDef[]) => {
     setData((prev) => ({
       ...prev,
-      values: values.map((v, i) => ({ ...v, color: getValueColor(i) })),
+      values: (Array.isArray(values) ? values : []).map((v, i) => ({
+        ...v,
+        color: getValueColor(i),
+      })),
     }));
   }, []);
 
