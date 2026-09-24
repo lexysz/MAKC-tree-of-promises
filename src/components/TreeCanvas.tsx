@@ -165,6 +165,9 @@ function colorToRGB(color: string): [number, number, number] {
 
 // ─── Custom Hooks ────────────────────────────────────────────────
 
+/**
+ * Управляет состоянием вида камеры (позиция и зум) и анимациями.
+ */
 function useCanvasView(bounds: GraphBounds, containerRef: React.RefObject<HTMLDivElement | null>) {
   const [view, setView] = useState<ViewState>({ x: 0, y: 0, k: 0.5 });
   const viewRef = useRef(view);
@@ -263,6 +266,10 @@ function useCanvasView(bounds: GraphBounds, containerRef: React.RefObject<HTMLDi
   return { view, setView, viewRef, animateTo, calculateFitView, zoomAt, stopAnimation };
 }
 
+/**
+ * Управляет взаимодействием с указателем: панорамирование, hover, перетаскивание
+ * и пинч-зум (двумя пальцами на мобильных устройствах).
+ */
 function usePointerInteraction(
   containerRef: React.RefObject<HTMLDivElement | null>,
   isAdmin: boolean | undefined
@@ -271,6 +278,8 @@ function usePointerInteraction(
   const [isPanning, setIsPanning] = useState(false);
   const pointers = useRef(new Map<number, PointerInfo>());
   const downInfo = useRef<DownInfo | null>(null);
+  // Расстояние между пальцами на предыдущем кадре (для пинч-зума)
+  const prevPinchDistance = useRef<number | null>(null);
 
   const handlePointerDown = (e: React.PointerEvent, onStartDrag: (nodeId: string) => void) => {
     const el = containerRef.current;
@@ -289,10 +298,18 @@ function usePointerInteraction(
       } else {
         setIsPanning(true);
       }
+    } else if (pointers.current.size === 2) {
+      // Второй палец появился — прерываем drag и пан, включаем пинч-зум
+      prevPinchDistance.current = null;
+      downInfo.current = null;
     }
   };
 
-  const handlePointerMove = (e: React.PointerEvent, onDrag: (dx: number, dy: number) => void) => {
+  const handlePointerMove = (
+    e: React.PointerEvent,
+    onDrag: (dx: number, dy: number) => void,
+    onPinch: (centerX: number, centerY: number, scaleFactor: number) => void
+  ) => {
     const prev = pointers.current.get(e.pointerId);
 
     if (!prev) {
@@ -307,6 +324,29 @@ function usePointerInteraction(
     const dy = e.clientY - prev.y;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
+    // Режим пинч-зума: два активных указателя
+    if (pointers.current.size === 2) {
+      const [p1, p2] = Array.from(pointers.current.values());
+      const distance = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+      if (prevPinchDistance.current !== null && prevPinchDistance.current > 0) {
+        const scaleFactor = distance / prevPinchDistance.current;
+        // Центрируем зум на средней точке между пальцами
+        const el = containerRef.current;
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          const centerX = (p1.x + p2.x) / 2 - rect.left;
+          const centerY = (p1.y + p2.y) / 2 - rect.top;
+          onPinch(centerX, centerY, scaleFactor);
+        }
+      }
+      prevPinchDistance.current = distance;
+      return;
+    }
+
+    // Обычный режим: одиночный указатель
+    prevPinchDistance.current = null;
+
     if (downInfo.current) {
       downInfo.current.moved += Math.abs(dx) + Math.abs(dy);
     }
@@ -318,6 +358,7 @@ function usePointerInteraction(
     const el = containerRef.current;
     if (el?.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
     pointers.current.delete(e.pointerId);
+    prevPinchDistance.current = null;
 
     if (pointers.current.size === 0) {
       setIsPanning(false);
@@ -329,6 +370,10 @@ function usePointerInteraction(
       if (info && info.moved < CLICK_THRESHOLD) {
         onSelect(info.nodeId);
       }
+    } else if (pointers.current.size === 1) {
+      // Один палец остался — сбрасываем пан, чтобы не было рывка
+      setIsPanning(false);
+      downInfo.current = null;
     }
   };
 
@@ -336,11 +381,25 @@ function usePointerInteraction(
     pointers.current.clear();
     setIsPanning(false);
     downInfo.current = null;
+    prevPinchDistance.current = null;
   };
 
-  return { hoverId, setHoverId, isPanning, handlePointerDown, handlePointerMove, handlePointerUp, handlePointerCancel };
+  return {
+    hoverId,
+    setHoverId,
+    isPanning,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    handlePointerCancel,
+  };
 }
 
+/**
+ * Управляет перетаскиванием узлов для администраторов.
+ * Использует временный offset для мгновенного визуального перемещения
+ * без мутации исходных данных дерева.
+ */
 function useDragNode(
   containerRef: React.RefObject<HTMLDivElement | null>,
   nodeById: React.MutableRefObject<Map<string, GraphNode>>,
@@ -841,19 +900,29 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
   const zoomBoost = canvasView.view.k < LOW_ZOOM_THRESHOLD ? LOW_ZOOM_BOOST : 1;
   const hoverNode = pointerInteraction.hoverId ? nodeById.current.get(pointerInteraction.hoverId) : undefined;
 
+  // ─── Event Handlers ────────────────────────────────────────────
+
   const handlePointerDown = (e: React.PointerEvent) => {
     canvasView.stopAnimation();
     pointerInteraction.handlePointerDown(e, (nodeId) => dragNode.startDrag(nodeId, e.clientX, e.clientY));
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
-    pointerInteraction.handlePointerMove(e, (dx, dy) => {
-      if (dragNode.dragNodeId && isAdmin) {
-        dragNode.updateDrag(e.clientX, e.clientY);
-      } else {
-        canvasView.setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+    pointerInteraction.handlePointerMove(
+      e,
+      // Callback для одиночного указателя (панорамирование или перетаскивание узла)
+      (dx, dy) => {
+        if (dragNode.dragNodeId && isAdmin) {
+          dragNode.updateDrag(e.clientX, e.clientY);
+        } else {
+          canvasView.setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+        }
+      },
+      // Callback для пинч-зума (два указателя)
+      (centerX, centerY, scaleFactor) => {
+        canvasView.zoomAt(centerX, centerY, scaleFactor, false);
       }
-    });
+    );
   };
 
   const handlePointerUp = (e: React.PointerEvent) => {
@@ -866,7 +935,7 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
   };
 
   return (
-       <div
+    <div
       ref={containerRef}
       className={`relative h-full overflow-hidden touch-none select-none transition-all duration-300 ${
         isFilterPanelOpen ? "w-full md:w-1/2 md:ml-auto" : "w-full"
