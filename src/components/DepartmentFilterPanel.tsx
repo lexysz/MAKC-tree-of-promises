@@ -151,7 +151,7 @@ export default function DepartmentFilterPanel({
   const totalFiltered = filteredNodes.length;
 
   return (
-    <aside className="pointer-events-auto absolute inset-x-0 bottom-0 z-30 flex max-h-[70vh] flex-col rounded-t-2xl border-t border-ink-700/60 bg-ink-900/95 shadow-2xl shadow-black/50 backdrop-blur-md md:inset-y-0 md:left-0 md:right-auto md:w-[380px] md:max-h-none md:rounded-none md:border-l-0 md:border-r">
+       <aside className="pointer-events-auto absolute inset-x-0 bottom-0 z-30 flex max-h-[70vh] flex-col rounded-t-2xl border-t border-ink-700/60 bg-ink-900/95 shadow-2xl shadow-black/50 backdrop-blur-md md:inset-y-0 md:left-0 md:right-auto md:w-1/2 md:max-h-none md:rounded-none md:border-l-0 md:border-r">
       {/* Цветная полоска сверху */}
       <div className="h-1 w-full shrink-0 bg-gradient-to-r from-lagoon via-lagoon/50 to-transparent" />
 
@@ -161,12 +161,12 @@ export default function DepartmentFilterPanel({
         <div className="flex items-center justify-between">
           <div>
             <h2 className="font-display text-[16px] font-bold text-mist-100">
-              Фильтр по подразделению
+              Обещания подразделения
             </h2>
             <p className="mt-0.5 text-[11.5px] text-mist-500">
               {selectedDepartment
-                ? `Показано ${totalFiltered} обещаний для «${selectedDepartment}»`
-                : "Выберите подразделение для фильтрации"}
+                ? `Показано ${totalFiltered} обещаний, которые даёт «${selectedDepartment}»`
+                : "Выберите подразделение — покажем все его обещания"}
             </p>
           </div>
           <button
