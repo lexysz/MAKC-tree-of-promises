@@ -17,7 +17,6 @@ const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
 const ZOOM_BTN_FACTOR = 1.4;
 const SEARCH_BLUR_DELAY_MS = 150;
 const MAX_SEARCH_RESULTS = 15;
-const FIT_RECALC_DELAY_MS = 350;
 
 const DUST_PARTICLES = [
   { left: "12%", top: "22%", size: 5, color: "rgba(67,214,181,0.35)", dur: "17s" },
@@ -553,6 +552,8 @@ export default function App() {
   // чтобы восстановить её после закрытия карточки
   const [panelStateBeforeCard, setPanelStateBeforeCard] = useState<boolean | null>(null);
   const canvasRef = useRef<TreeCanvasHandle>(null);
+  // Пропускаем первую центровку: начальную анимацию делает сам TreeCanvas
+  const firstCameraRun = useRef(true);
 
   const graph = useMemo(() => buildGraph(data.company, data.values, data.customPositions), [data]);
   const byId = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
@@ -586,8 +587,6 @@ export default function App() {
       setShowDepartmentPanel(false);
     }
     setSelectedId(id);
-    const branchIds = collectFamily(id, byId);
-    canvasRef.current?.focusBranch(Array.from(branchIds));
   };
 
   const clearSelection = () => {
@@ -600,6 +599,27 @@ export default function App() {
   };
 
   useKeyboardShortcuts(view, canvasRef, clearSelection);
+
+  // Единая точка управления камерой: срабатывает ПОСЛЕ коммита DOM,
+  // когда контейнер канваса уже получил финальную ширину.
+  // Выбор узла → фокус на ветке; снятие выбора или смена панели → общий вид.
+  useEffect(() => {
+    if (firstCameraRun.current) {
+      firstCameraRun.current = false;
+      return;
+    }
+
+    const raf = requestAnimationFrame(() => {
+      if (selectedId) {
+        const branchIds = collectFamily(selectedId, byId);
+        canvasRef.current?.focusBranch(Array.from(branchIds));
+      } else {
+        canvasRef.current?.fit(true);
+      }
+    });
+
+    return () => cancelAnimationFrame(raf);
+  }, [selectedId, showDepartmentPanel, byId]);
 
   // ─── Фильтрация по подразделению ───────────────────────────────
 
@@ -662,15 +682,6 @@ export default function App() {
     return result.sort((a, b) => a.title.localeCompare(b.title, "ru"));
   }, [departmentFilter, graph.nodes, data.values]);
 
-  // Пересчитываем положение камеры при открытии/закрытии панели фильтра,
-  // чтобы дерево центрировалось в оставшемся пространстве
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      canvasRef.current?.fit(true);
-    }, FIT_RECALC_DELAY_MS);
-    return () => clearTimeout(timer);
-  }, [showDepartmentPanel]);
-
   // ─── Рендеринг ─────────────────────────────────────────────────
 
   if (loading || checking) {
@@ -726,6 +737,7 @@ export default function App() {
           companyLogo={data.company.logo}
           filterHighlightIds={filterHighlightIds}
           isFilterPanelOpen={showDepartmentPanel}
+          isCardOpen={selectedId !== null}
         />
       </div>
 
