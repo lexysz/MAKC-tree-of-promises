@@ -19,26 +19,49 @@ export interface NodePatch {
 
 /**
  * Применяет поля из patch к целевому объекту, игнорируя undefined.
- * Пустые строки преобразуются в undefined для опциональных полей.
- */
+/** Поля, в которых пустая строка означает «значения нет» и хранится как undefined */
+const OPTIONAL_TEXT_FIELDS = new Set(["who", "toWhom", "metrics"]);
+
 function applyPatch<T extends object>(target: T, patch: Partial<T>): void {
   (Object.keys(patch) as Array<keyof T>).forEach((key) => {
     const value = patch[key];
     if (value === undefined) return;
-    target[key] = (typeof value === "string" && value === ""
-      ? undefined
-      : value) as T[keyof T];
+    const isEmptyOptional =
+      typeof value === "string" && value === "" && OPTIONAL_TEXT_FIELDS.has(key as string);
+    target[key] = (isEmptyOptional ? undefined : value) as T[keyof T];
   });
 }
-
 /**
- * Глубокое клонирование дерева через structuredClone.
- * В отличие от JSON.parse/stringify, корректно обрабатывает Date и undefined.
+ * Восстанавливает обязательные строковые поля, если в данных оказался undefined
+ * (защищает от записей, сохранённых предыдущими версиями приложения).
  */
-function cloneTree(data: TreeData): TreeData {
-  return structuredClone(data);
-}
+function sanitizeTree(data: TreeData): TreeData {
+  const str = (value: string | undefined, fallback = ""): string =>
+    typeof value === "string" ? value : fallback;
 
+  data.company.title = str(data.company.title);
+  data.company.short = str(data.company.short);
+  data.company.description = str(data.company.description);
+
+  for (const value of data.values) {
+    value.title = str(value.title);
+    value.short = str(value.short);
+    value.description = str(value.description);
+
+    for (const root of value.promises) {
+      root.title = str(root.title);
+      root.short = str(root.short, root.title);
+      root.description = str(root.description, root.title);
+
+      for (const support of root.supports) {
+        support.title = str(support.title);
+        support.description = str(support.description, support.title);
+      }
+    }
+  }
+
+  return data;
+}
 /** Находит узел в дереве по ID. */
 function findNode(data: TreeData, id: string) {
   if (data.company.id === id) return data.company;
@@ -67,9 +90,9 @@ function reassignColors(data: TreeData): TreeData {
 
 function loadFromStorage(): TreeData | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+       const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return reassignColors(JSON.parse(raw) as TreeData);
+    return reassignColors(sanitizeTree(JSON.parse(raw) as TreeData));
   } catch {
     // localStorage недоступен или повреждён
     return null;
@@ -94,7 +117,7 @@ async function loadFromSupabase(): Promise<TreeData | null> {
       .single();
 
     if (error || !data) return null;
-    return reassignColors((data as { data: TreeData }).data);
+    return reassignColors(sanitizeTree((data as { data: TreeData }).data));
   } catch (error) {
     console.error("Error loading from Supabase:", error);
     return null;
