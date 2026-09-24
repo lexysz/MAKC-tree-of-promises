@@ -6,7 +6,7 @@ import type { ImportResult } from "../../lib/excel";
 import { TEMPLATE_HEADERS, downloadTemplate, parseWorkbook } from "../../lib/excel";
 import { uploadLogo } from "../../lib/supabase";
 
-// ─── Constants ───────────────────────────────────────────────────
+// ─── Constants ──────────────────────────────────────────────────
 
 const CORE_COLOR = "#8fb6c0";
 const TOAST_DURATION_MS = 2600;
@@ -43,11 +43,11 @@ interface Props {
   onResetAllPositions: () => void;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────
 
 /**
  * Находит узел любого типа в структуре дерева.
- * Возвращает унифицированный объект с полями узла.
+ * Все переборы защищены Array.isArray на случай испорченных данных.
  */
 function findAny(data: TreeData, id: string): AnyDef | null {
   if (data.company.id === id) {
@@ -55,66 +55,38 @@ function findAny(data: TreeData, id: string): AnyDef | null {
     return {
       tier: "company",
       id: c.id,
-      title: c.title,
+      title: c.title ?? "",
       short: c.short,
-      description: c.description,
+      description: c.description ?? "",
       color: CORE_COLOR,
       logo: c.logo,
     };
   }
 
-  for (const v of data.values) {
+  const values = Array.isArray(data.values) ? data.values : [];
+  for (const v of values) {
     if (v.id === id) {
-      return {
-        tier: "value",
-        id: v.id,
-        title: v.title,
-        short: v.short,
-        description: v.description,
-        color: v.color,
-      };
+      return { tier: "value", id: v.id, title: v.title ?? "", short: v.short, description: v.description ?? "", color: v.color };
     }
-
-    for (const r of v.promises) {
+    const promises = Array.isArray(v.promises) ? v.promises : [];
+    for (const r of promises) {
       if (r.id === id) {
-        return {
-          tier: "root",
-          id: r.id,
-          title: r.title,
-          short: r.short,
-          description: r.description,
-          who: r.who,
-          toWhom: r.toWhom,
-          metrics: r.metrics,
-          color: v.color,
-        };
+        return { tier: "root", id: r.id, title: r.title ?? "", short: r.short, description: r.description ?? "", who: r.who, toWhom: r.toWhom, metrics: r.metrics, color: v.color };
       }
-
-      for (const s of r.supports) {
+      const supports = Array.isArray(r.supports) ? r.supports : [];
+      for (const s of supports) {
         if (s.id === id) {
-          return {
-            tier: "support",
-            id: s.id,
-            title: s.title,
-            description: s.description,
-            who: s.who,
-            toWhom: s.toWhom,
-            metrics: s.metrics,
-            color: v.color,
-          };
+          return { tier: "support", id: s.id, title: s.title ?? "", description: s.description ?? "", who: s.who, toWhom: s.toWhom, metrics: s.metrics, color: v.color };
         }
       }
     }
   }
-
   return null;
 }
 
 // ─── Custom Hooks ────────────────────────────────────────────────
 
-/**
- * Хук для управления toast-уведомлениями с автоматическим скрытием.
- */
+/** Хук для управления toast-уведомлениями с автоматическим скрытием. */
 function useToast() {
   const [toast, setToast] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
@@ -128,11 +100,9 @@ function useToast() {
   return { toast, notify };
 }
 
-/**
- * Хук для двухэтапного подтверждения деструктивных действий.
- */
+/** Хук для двухэтапного подтверждения деструктивных действий. */
 function useConfirmation(timeoutMs: number = CONFIRM_TIMEOUT_MS) {
-  const [confirming, setConfirming] = (false);
+  const [confirming, setConfirming] = useState(false);
   const timerRef = useRef<number | null>(null);
 
   const request = (onConfirm: () => void) => {
@@ -154,20 +124,8 @@ function useConfirmation(timeoutMs: number = CONFIRM_TIMEOUT_MS) {
 
 function BackIcon() {
   return (
-    <svg
-      width="13"
-      height="13"
-      viewBox="0 0 14 14"
-      fill="none"
-      className="transition-transform group-hover:-translate-x-0.5"
-    >
-      <path
-        d="M8.5 2.5L4 7l4.5 4.5"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" className="transition-transform group-hover:-translate-x-0.5">
+      <path d="M8.5 2.5L4 7l4.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -176,12 +134,7 @@ function LockIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
       <rect x="3" y="7" width="10" height="7" rx="1.6" stroke="currentColor" strokeWidth="1.4" />
-      <path
-        d="M5.2 7V5.4a2.8 2.8 0 115.6 0V7"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
+      <path d="M5.2 7V5.4a2.8 2.8 0 115.6 0V7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }
@@ -190,13 +143,7 @@ function CheckIcon({ className = "" }: { className?: string }) {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className={className}>
       <circle cx="7" cy="7" r="5.6" stroke="currentColor" strokeWidth="1.3" />
-      <path
-        d="M4.4 7.2l1.8 1.8 3.4-3.8"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d="M4.4 7.2l1.8 1.8 3.4-3.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -204,12 +151,7 @@ function CheckIcon({ className = "" }: { className?: string }) {
 function EditIcon() {
   return (
     <svg width="22" height="22" viewBox="0 0 20 20" fill="none">
-      <path
-        d="M3 13.5l8.8-8.8a1.6 1.6 0 012.3 0l1.2 1.2a1.6 1.6 0 010 2.3L6.5 17H3v-3.5z"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinejoin="round"
-      />
+      <path d="M3 13.5l8.8-8.8a1.6 1.6 0 012.3 0l1.2 1.2a1.6 1.6 0 010 2.3L6.5 17H3v-3.5z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
       <path d="M11 6.5l2.5 2.5" stroke="currentColor" strokeWidth="1.4" />
     </svg>
   );
@@ -217,13 +159,8 @@ function EditIcon() {
 
 function WarningIcon() {
   return (
-    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" className="text-ember">
-      <path
-        d="M7 1.8L13 12H1L7 1.8z"
-        stroke="currentColor"
-        strokeWidth="1.3"
-        strokeLinejoin="round"
-      />
+    <svg width="15" height="15" viewBox="0 0 14 14" fill="none" className="mt-0.5 shrink-0 text-ember">
+      <path d="M7 1.8L13 12H1L7 1.8z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
       <path d="M7 5.6v2.8M7 10.2v.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
     </svg>
   );
@@ -232,19 +169,8 @@ function WarningIcon() {
 function UploadIcon() {
   return (
     <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-      <path
-        d="M10 13V3.5m0 0L6.5 7M10 3.5L13.5 7"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M3.5 12.5v2.6c0 .8.6 1.4 1.4 1.4h10.2c.8 0 1.4-.6 1.4-1.4v-2.6"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
+      <path d="M10 13V3.5m0 0L6.5 7M10 3.5L13.5 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3.5 12.5v2.6c0 .8.6 1.4 1.4 1.4h10.2c.8 0 1.4-.6 1.4-1.4v-2.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
     </svg>
   );
 }
@@ -252,13 +178,7 @@ function UploadIcon() {
 function DownloadIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-      <path
-        d="M7 2v7.5m0 0L4 6.7M7 9.5l3-2.8M2.5 12h9"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d="M7 2v7.5m0 0L4 6.7M7 9.5l3-2.8M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -266,13 +186,7 @@ function DownloadIcon() {
 function SavedIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-      <path
-        d="M2.5 7.5l3 3 6-6.5"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      <path d="M2.5 7.5l3 3 6-6.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -291,17 +205,7 @@ interface NodeListItemProps {
   count?: number;
 }
 
-function NodeListItem({
-  tier,
-  id,
-  title,
-  color,
-  active,
-  onSelect,
-  visible,
-  indent = 0,
-  count,
-}: NodeListItemProps) {
+function NodeListItem({ tier, id, title, color, active, onSelect, visible, indent = 0, count }: NodeListItemProps) {
   if (!visible) return null;
 
   return (
@@ -309,9 +213,7 @@ function NodeListItem({
       onClick={() => onSelect(id)}
       style={{ paddingLeft: 10 + indent }}
       className={`group mb-1 flex w-full items-center gap-2.5 rounded-lg border py-2 pr-3 text-left transition-all ${
-        active
-          ? "border-gold/50 bg-gold/[0.08]"
-          : "border-transparent hover:border-ink-700/70 hover:bg-ink-850/70"
+        active ? "border-gold/50 bg-gold/[0.08]" : "border-transparent hover:border-ink-700/70 hover:bg-ink-850/70"
       }`}
     >
       <span
@@ -319,23 +221,14 @@ function NodeListItem({
         style={
           tier === "support"
             ? { border: `2px solid ${color}` }
-            : {
-                background: tier === "value" ? color : `${color}33`,
-                boxShadow: `0 0 7px ${color}55`,
-              }
+            : { background: tier === "value" ? color : `${color}33`, boxShadow: `0 0 7px ${color}55` }
         }
       />
-      <span
-        className={`min-w-0 flex-1 truncate text-[12.5px] leading-snug ${
-          active ? "font-semibold text-mist-100" : "text-mist-300 group-hover:text-mist-100"
-        }`}
-      >
+      <span className={`min-w-0 flex-1 truncate text-[12.5px] leading-snug ${active ? "font-semibold text-mist-100" : "text-mist-300 group-hover:text-mist-100"}`}>
         {title}
       </span>
       {count !== undefined && (
-        <span className="shrink-0 rounded-full border border-ink-700/70 px-1.5 py-px text-[10px] font-semibold text-mist-500">
-          {count}
-        </span>
+        <span className="shrink-0 rounded-full border border-ink-700/70 px-1.5 py-px text-[10px] font-semibold text-mist-500">{count}</span>
       )}
     </button>
   );
@@ -350,9 +243,10 @@ interface ValueGroupProps {
 }
 
 function ValueGroup({ value, selectedId, onSelect, query, tierFilter }: ValueGroupProps) {
-  const matches = (text: string) => !query || text.toLowerCase().includes(query);
-  const anyRootVisible = value.promises.some(
-    (r) => matches(r.title) || r.supports.some((s) => matches(s.title))
+  const promises = Array.isArray(value.promises) ? value.promises : [];
+  const matches = (text: string) => !query || (text ?? "").toLowerCase().includes(query);
+  const anyRootVisible = promises.some(
+    (r) => matches(r.title) || (Array.isArray(r.supports) ? r.supports : []).some((s) => matches(s.title)),
   );
   const showGroup = query
     ? matches(value.title) || anyRootVisible
@@ -365,17 +259,18 @@ function ValueGroup({ value, selectedId, onSelect, query, tierFilter }: ValueGro
       <NodeListItem
         tier="value"
         id={value.id}
-        title={value.title}
+        title={value.title ?? ""}
         color={value.color}
         active={selectedId === value.id}
         onSelect={onSelect}
         visible={!query || matches(value.title) || anyRootVisible}
-        count={value.promises.length}
+        count={promises.length}
       />
-      {value.promises.map((r) => {
+      {promises.map((r) => {
+        const supports = Array.isArray(r.supports) ? r.supports : [];
         const rVisible = (tierFilter === "all" || tierFilter === "root") && (query ? matches(r.title) : true);
-        const anySup = r.supports.some(
-          (s) => (tierFilter === "all" || tierFilter === "support") && (query ? matches(s.title) : true)
+        const anySup = supports.some(
+          (s) => (tierFilter === "all" || tierFilter === "support") && (query ? matches(s.title) : true),
         );
         if (!rVisible && !anySup && query) return null;
 
@@ -384,20 +279,20 @@ function ValueGroup({ value, selectedId, onSelect, query, tierFilter }: ValueGro
             <NodeListItem
               tier="root"
               id={r.id}
-              title={r.title}
+              title={r.title ?? ""}
               color={value.color}
               active={selectedId === r.id}
               onSelect={onSelect}
               visible={rVisible || (query === "" && tierFilter !== "support")}
               indent={26}
-              count={r.supports.length}
+              count={supports.length}
             />
-            {r.supports.map((s) => (
+            {supports.map((s) => (
               <NodeListItem
                 key={s.id}
                 tier="support"
                 id={s.id}
-                title={s.title}
+                title={s.title ?? ""}
                 color={value.color}
                 active={selectedId === s.id}
                 onSelect={onSelect}
@@ -435,13 +330,16 @@ interface NodeEditorProps {
 }
 
 function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
+  // Безопасная инициализация: защищаемся от undefined в испорченных данных
   const [title, setTitle] = useState(node.title ?? "");
   const [short, setShort] = useState(node.short ?? "");
   const [description, setDescription] = useState(node.description ?? "");
-  const [who, setWho] = (node.who ?? "");
+  const [who, setWho] = useState(node.who ?? "");
   const [toWhom, setToWhom] = useState(node.toWhom ?? "");
   const [metrics, setMetrics] = useState(node.metrics ?? "");
-  const [logo, setLogo] = useState<string | undefined>(node.logo);
+  const [logo, setLogo] = useState<string | undefined>(
+    typeof node.logo === "string" && node.logo.startsWith("http") ? node.logo : undefined,
+  );
   const [saved, setSaved] = useState(false);
   const [uploading, setUploading] = useState(false);
   const savedTimer = useRef<number | null>(null);
@@ -473,7 +371,7 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
     }
   };
 
-   const dirty =
+  const dirty =
     title.trim() !== (node.title ?? "") ||
     (hasShort && short.trim() !== (node.short ?? "")) ||
     description.trim() !== (node.description ?? "") ||
@@ -488,15 +386,15 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
 
     if (isCompany) {
       onUpdateCompany({
-        title: title.trim() || node.title,
-        short: short.trim() || title.trim() || node.short,
+        title: title.trim() || (node.title ?? ""),
+        short: short.trim() || title.trim() || (node.short ?? ""),
         description: description.trim(),
         logo,
       });
     } else {
       onSave({
-        title: title.trim() || node.title,
-        ...(hasShort ? { short: short.trim() || title.trim() || node.short } : {}),
+        title: title.trim() || (node.title ?? ""),
+        ...(hasShort ? { short: short.trim() || title.trim() || (node.short ?? "") } : {}),
         description: description.trim(),
         ...(isPromise ? { who: who.trim(), toWhom: toWhom.trim(), metrics: metrics.trim() } : {}),
       });
@@ -512,11 +410,7 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
       <div className="flex flex-wrap items-center gap-2.5">
         <span
           className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.14em]"
-          style={{
-            borderColor: `${node.color}55`,
-            color: node.color,
-            background: `${node.color}12`,
-          }}
+          style={{ borderColor: `${node.color}55`, color: node.color, background: `${node.color}12` }}
         >
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: node.color }} />
           {TIER_LABEL[node.tier]}
@@ -539,14 +433,7 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
           <div>
             <label className="field-label">Логотип компании (PNG)</label>
             <div className="flex items-center gap-3">
-              <input
-                ref={logoInputRef}
-                type="file"
-                accept="image/png"
-                onChange={handleLogoUpload}
-                className="hidden"
-                disabled={uploading}
-              />
+              <input ref={logoInputRef} type="file" accept="image/png" onChange={handleLogoUpload} className="hidden" disabled={uploading} />
               <button
                 type="button"
                 onClick={() => logoInputRef.current?.click()}
@@ -557,16 +444,8 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
               </button>
               {logo && (
                 <div className="flex items-center gap-2">
-                  <img
-                    src={logo}
-                    alt="Логотип"
-                    className="h-10 w-10 rounded-lg border border-ink-700/60 bg-ink-850 object-contain"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setLogo(undefined)}
-                    className="text-[11px] text-ember transition hover:text-ember/80"
-                  >
+                  <img src={logo} alt="Логотип" className="h-10 w-10 rounded-lg border border-ink-700/60 bg-ink-850 object-contain" />
+                  <button type="button" onClick={() => setLogo(undefined)} className="text-[11px] text-ember transition hover:text-ember/80">
                     Удалить
                   </button>
                 </div>
@@ -614,37 +493,20 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
 
         {isPromise && (
           <div className="border-t border-ink-700/50 pt-5">
-            <div className="mb-4 text-[10.5px] font-bold uppercase tracking-[0.18em] text-mist-500">
-              Паспорт обещания
-            </div>
+            <div className="mb-4 text-[10.5px] font-bold uppercase tracking-[0.18em] text-mist-500">Паспорт обещания</div>
             <div className="grid gap-5 sm:grid-cols-2">
               <div>
                 <label className="field-label">Кто даёт (команда)</label>
-                <input
-                  className="field"
-                  value={who}
-                  onChange={(e) => setWho(e.target.value)}
-                  placeholder="Команда продукта"
-                />
+                <input className="field" value={who} onChange={(e) => setWho(e.target.value)} placeholder="Команда продукта" />
               </div>
               <div>
                 <label className="field-label">Кому (клиент, команда, роль)</label>
-                <input
-                  className="field"
-                  value={toWhom}
-                  onChange={(e) => setToWhom(e.target.value)}
-                  placeholder="Клиенты B2B"
-                />
+                <input className="field" value={toWhom} onChange={(e) => setToWhom(e.target.value)} placeholder="Клиенты B2B" />
               </div>
             </div>
             <div className="mt-5">
               <label className="field-label">Метрики</label>
-              <input
-                className="field"
-                value={metrics}
-                onChange={(e) => setMetrics(e.target.value)}
-                placeholder="Аптайм ≥ 99,9% · NPS ≥ 60"
-              />
+              <input className="field" value={metrics} onChange={(e) => setMetrics(e.target.value)} placeholder="Аптайм ≥ 99,9% · NPS ≥ 60" />
             </div>
           </div>
         )}
@@ -662,11 +524,7 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
         >
           Сохранить
         </button>
-        <span
-          className={`text-[11.5px] transition-opacity ${
-            dirty ? "text-gold opacity-100" : "text-mist-500 opacity-60"
-          }`}
-        >
+        <span className={`text-[11.5px] transition-opacity ${dirty ? "text-gold opacity-100" : "text-mist-500 opacity-60"}`}>
           {dirty ? "есть несохранённые изменения" : "изменений нет"}
         </span>
       </div>
@@ -712,26 +570,15 @@ function ImportSection({ onApplied }: ImportSectionProps) {
         </p>
 
         <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDrag(true);
-          }}
+          onDragOver={(e) => { e.preventDefault(); setDrag(true); }}
           onDragLeave={() => setDrag(false)}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDrag(false);
-            handleFile(e.dataTransfer.files?.[0]);
-          }}
+          onDrop={(e) => { e.preventDefault(); setDrag(false); handleFile(e.dataTransfer.files?.[0]); }}
           onClick={() => inputRef.current?.click()}
           role="button"
           tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") inputRef.current?.click();
-          }}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") inputRef.current?.click(); }}
           className={`mt-6 flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed px-6 py-12 text-center transition-all duration-200 ${
-            drag
-              ? "scale-[1.01] border-gold bg-gold/[0.07]"
-              : "border-ink-700/80 bg-ink-900/50 hover:border-mist-500/50 hover:bg-ink-850/70"
+            drag ? "scale-[1.01] border-gold bg-gold/[0.07]" : "border-ink-700/80 bg-ink-900/50 hover:border-mist-500/50 hover:bg-ink-850/70"
           }`}
         >
           <input
@@ -739,10 +586,7 @@ function ImportSection({ onApplied }: ImportSectionProps) {
             type="file"
             accept=".xlsx,.xls,.csv"
             className="hidden"
-            onChange={(e) => {
-              handleFile(e.target.files?.[0]);
-              e.target.value = "";
-            }}
+            onChange={(e) => { handleFile(e.target.files?.[0]); e.target.value = ""; }}
           />
           {busy ? (
             <>
@@ -751,17 +595,12 @@ function ImportSection({ onApplied }: ImportSectionProps) {
             </>
           ) : (
             <>
-              <span
-                className={`grid h-12 w-12 place-items-center rounded-xl border transition-colors ${
-                  drag ? "border-gold/60 bg-gold/10 text-gold" : "border-ink-700 bg-ink-850 text-mist-400"
-                }`}
-              >
+              <span className={`grid h-12 w-12 place-items-center rounded-xl border transition-colors ${drag ? "border-gold/60 bg-gold/10 text-gold" : "border-ink-700 bg-ink-850 text-mist-400"}`}>
                 <UploadIcon />
               </span>
               <div>
                 <p className="text-[14px] font-semibold text-mist-100">
-                  Перетащите файл сюда{" "}
-                  <span className="font-normal text-mist-500">или кликните для выбора</span>
+                  Перетащите файл сюда <span className="font-normal text-mist-500">или кликните для выбора</span>
                 </p>
                 <p className="mt-1 text-[11.5px] text-mist-500">.xlsx · .xls · .csv</p>
               </div>
@@ -773,9 +612,7 @@ function ImportSection({ onApplied }: ImportSectionProps) {
           <div className="mt-4 flex items-start gap-3 rounded-xl border border-ember/40 bg-ember/[0.08] px-4 py-3.5">
             <WarningIcon />
             <div>
-              <p className="text-[12.5px] font-semibold text-ember">
-                Файл не подошёл{fileName ? `: ${fileName}` : ""}
-              </p>
+              <p className="text-[12.5px] font-semibold text-ember">Файл не подошёл{fileName ? `: ${fileName}` : ""}</p>
               <p className="mt-0.5 text-[12px] leading-relaxed text-mist-300">{error}</p>
             </div>
           </div>
@@ -795,23 +632,19 @@ function ImportSection({ onApplied }: ImportSectionProps) {
                 { n: result.stats.supports, label: "поддерживающих", c: "#6fb4f2" },
               ].map((s) => (
                 <span key={s.label} className="flex items-baseline gap-1.5">
-                  <span className="font-display text-[20px] font-bold" style={{ color: s.c }}>
-                    {s.n}
-                  </span>
+                  <span className="font-display text-[20px] font-bold" style={{ color: s.c }}>{s.n}</span>
                   <span className="text-[11px] text-mist-500">{s.label}</span>
                 </span>
               ))}
             </div>
             {result.warnings.length > 0 && (
-              <div className="mx-5 mb-4 max-h-36 overflow-y-auto rounded-lg border border-gold/30 bg-gold/[0.06] px-4 py-3 panel-scroll">
+              <div className="panel-scroll mx-5 mb-4 max-h-36 overflow-y-auto rounded-lg border border-gold/30 bg-gold/[0.06] px-4 py-3">
                 <p className="mb-1.5 text-[10.5px] font-bold uppercase tracking-[0.16em] text-gold">
                   Предупреждения · {result.warnings.length}
                 </p>
                 <ul className="space-y-1">
                   {result.warnings.map((w: string, i: number) => (
-                    <li key={i} className="text-[11.5px] leading-relaxed text-mist-300">
-                      • {w}
-                    </li>
+                    <li key={i} className="text-[11.5px] leading-relaxed text-mist-300">• {w}</li>
                   ))}
                 </ul>
               </div>
@@ -835,9 +668,7 @@ function ImportSection({ onApplied }: ImportSectionProps) {
 
         <div className="mt-7 rounded-2xl border border-ink-700/60 bg-ink-900/50 p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-mist-500">
-              Ожидаемые колонки
-            </p>
+            <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-mist-500">Ожидаемые колонки</p>
             <button
               onClick={downloadTemplate}
               className="inline-flex items-center gap-2 rounded-lg border border-lagoon/40 px-3.5 py-1.5 text-[11.5px] font-semibold text-lagoon transition hover:bg-lagoon/10"
@@ -848,12 +679,7 @@ function ImportSection({ onApplied }: ImportSectionProps) {
           </div>
           <div className="mt-3.5 flex flex-wrap gap-1.5">
             {TEMPLATE_HEADERS.map((h: string, i: number) => (
-              <code
-                key={i}
-                className="rounded-md border border-ink-700/60 bg-ink-850 px-2 py-1 text-[10.5px] text-mist-300"
-              >
-                {h}
-              </code>
+              <code key={i} className="rounded-md border border-ink-700/60 bg-ink-850 px-2 py-1 text-[10.5px] text-mist-300">{h}</code>
             ))}
           </div>
         </div>
@@ -864,7 +690,7 @@ function ImportSection({ onApplied }: ImportSectionProps) {
 
 function Toast({ message }: { message: string }) {
   return (
-    <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 transition-all duration-300">
+    <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2">
       <div className="flex items-center gap-2.5 rounded-full border border-lagoon/40 bg-ink-900/95 px-5 py-2.5 shadow-xl shadow-black/50 backdrop-blur-md">
         <CheckIcon className="text-lagoon" />
         <span className="text-[12.5px] font-medium text-mist-100">{message}</span>
@@ -906,11 +732,15 @@ export default function AdminPanel({
   const counts = useMemo(() => {
     let roots = 0;
     let supports = 0;
-    data.values.forEach((v) => {
-      roots += v.promises.length;
-      v.promises.forEach((r) => (supports += r.supports.length));
+    const values = Array.isArray(data.values) ? data.values : [];
+    values.forEach((v) => {
+      const promises = Array.isArray(v.promises) ? v.promises : [];
+      roots += promises.length;
+      promises.forEach((r) => {
+        supports += (Array.isArray(r.supports) ? r.supports : []).length;
+      });
     });
-    return { values: data.values.length, roots, supports };
+    return { values: values.length, roots, supports };
   }, [data]);
 
   const handleReset = () => {
@@ -928,14 +758,12 @@ export default function AdminPanel({
     });
   };
 
+  const values = Array.isArray(data.values) ? data.values : [];
+
   return (
     <div className="relative z-10 flex h-full w-full flex-col">
-      {/* Header */}
       <header className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-2 border-b border-ink-700/60 bg-ink-900/85 px-4 py-3 backdrop-blur-md md:px-6">
-        <button
-          onClick={onBack}
-          className="group inline-flex items-center gap-2 text-[12px] font-medium text-mist-400 transition hover:text-lagoon"
-        >
+        <button onClick={onBack} className="group inline-flex items-center gap-2 text-[12px] font-medium text-mist-400 transition hover:text-lagoon">
           <BackIcon />
           к дереву
         </button>
@@ -947,9 +775,7 @@ export default function AdminPanel({
             <LockIcon />
           </span>
           <div>
-            <div className="font-display text-[14px] font-bold leading-tight text-mist-100">
-              Админ-панель
-            </div>
+            <div className="font-display text-[14px] font-bold leading-tight text-mist-100">Админ-панель</div>
             <div className="text-[10.5px] text-mist-500">
               {counts.values} ценностей · {counts.roots} корневых · {counts.supports} поддерживающих
               {modified && <span className="ml-1.5 font-semibold text-gold">· изменено</span>}
@@ -963,9 +789,7 @@ export default function AdminPanel({
               key={tabKey}
               onClick={() => setTab(tabKey)}
               className={`rounded-md px-3.5 py-1.5 text-[12px] font-semibold transition-all ${
-                tab === tabKey
-                  ? "bg-gold text-ink-950 shadow-sm"
-                  : "text-mist-400 hover:text-mist-100"
+                tab === tabKey ? "bg-gold text-ink-950 shadow-sm" : "text-mist-400 hover:text-mist-100"
               }`}
             >
               {tabKey === "editor" ? "Редактор" : "Импорт Excel"}
@@ -1003,17 +827,11 @@ export default function AdminPanel({
         </div>
       </header>
 
-      {/* Content */}
       {tab === "editor" ? (
         <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[330px_1fr]">
           <aside className="flex min-h-0 flex-col border-r border-ink-700/60 bg-ink-900/60 max-md:hidden">
             <div className="shrink-0 space-y-2.5 border-b border-ink-700/50 p-3.5">
-              <input
-                className="field"
-                placeholder="Поиск…"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
+              <input className="field" placeholder="Поиск…" value={query} onChange={(e) => setQuery(e.target.value)} />
               <div className="flex gap-1.5">
                 {(["all", "company", "value", "root", "support"] as const).map((filterKey) => (
                   <button
@@ -1025,15 +843,7 @@ export default function AdminPanel({
                         : "border-ink-700/60 text-mist-500 hover:text-mist-300"
                     }`}
                   >
-                    {filterKey === "all"
-                      ? "Все"
-                      : filterKey === "company"
-                        ? "Ядро"
-                        : filterKey === "value"
-                          ? "Ценности"
-                          : filterKey === "root"
-                            ? "Корневые"
-                            : "Поддерж."}
+                    {filterKey === "all" ? "Все" : filterKey === "company" ? "Ядро" : filterKey === "value" ? "Ценности" : filterKey === "root" ? "Корневые" : "Поддерж."}
                   </button>
                 ))}
               </div>
@@ -1043,13 +853,13 @@ export default function AdminPanel({
               <NodeListItem
                 tier="company"
                 id={data.company.id}
-                title={data.company.title}
+                title={data.company.title ?? ""}
                 color={CORE_COLOR}
                 active={selectedId === data.company.id}
                 onSelect={setSelectedId}
                 visible={tierFilter === "all" || tierFilter === "company"}
               />
-              {data.values.map((v) => (
+              {values.map((v) => (
                 <ValueGroup
                   key={v.id}
                   value={v}
@@ -1084,9 +894,7 @@ export default function AdminPanel({
             onApplyImport(r);
             setTab("editor");
             setSelectedId(null);
-            notify(
-              `Импорт: ${r.stats.roots} корневых · ${r.stats.supports} поддерживающих`
-            );
+            notify(`Импорт: ${r.stats.roots} корневых · ${r.stats.supports} поддерживающих`);
           }}
         />
       )}
