@@ -362,7 +362,10 @@ interface HeaderProps {
   onAdminClick: () => void;
   onNavigate: (id: string) => void;
   onDepartmentFilterClick: () => void;
+  isFilterActive: boolean;
 }
+
+function Header({ companyTitle, companyLogo, counts, search, onAdminClick, onNavigate, onDepartmentFilterClick, isFilterActive }: HeaderProps) {
 
 function Header({ companyTitle, companyLogo, counts, search, onAdminClick, onNavigate, onDepartmentFilterClick }: HeaderProps) {
   return (
@@ -402,13 +405,20 @@ function Header({ companyTitle, companyLogo, counts, search, onAdminClick, onNav
           onSelect={onNavigate}
         />
 
-        <button
+          <button
           onClick={onDepartmentFilterClick}
-          title="Фильтр по подразделению"
-          className="hint-in group pointer-events-auto flex h-[46px] items-center gap-2.5 rounded-xl border border-lagoon/35 bg-ink-900/80 px-4 text-[12px] font-semibold text-lagoon backdrop-blur-md transition-all duration-200 hover:-translate-y-0.5 hover:border-lagoon/70 hover:bg-lagoon/10 hover:shadow-lg hover:shadow-lagoon/10"
+          title={isFilterActive ? "Фильтр активен — нажмите, чтобы открыть панель" : "Фильтр по подразделению"}
+          className={`hint-in group pointer-events-auto flex h-[46px] items-center gap-2.5 rounded-xl border px-4 text-[12px] font-semibold backdrop-blur-md transition-all duration-200 hover:-translate-y-0.5 ${
+            isFilterActive
+              ? "border-lagoon bg-lagoon/20 text-lagoon shadow-lg shadow-lagoon/20"
+              : "border-lagoon/35 bg-ink-900/80 text-lagoon hover:border-lagoon/70 hover:bg-lagoon/10 hover:shadow-lg hover:shadow-lagoon/10"
+          }`}
         >
           <FilterIcon />
           Подразделения
+          {isFilterActive && (
+            <span className="grid h-2 w-2 place-items-center rounded-full bg-lagoon" aria-hidden="true" />
+          )}
         </button>
 
         <button
@@ -697,7 +707,8 @@ export default function App() {
         search={search}
         onAdminClick={() => setView("admin")}
         onNavigate={navigate}
-        onDepartmentFilterClick={() => setShowDepartmentPanel(true)}
+        onDepartmentFilterClick={() => setShowDepartmentPanel((prev) => !prev)}
+        isFilterActive={departmentFilter !== null}
       />
 
       <Legend companyLogo={data.company.logo} />
