@@ -78,6 +78,8 @@ interface Props {
   isAdmin?: boolean;
   onNodeDrag?: (id: string, x: number, y: number) => void;
   companyLogo?: string;
+  /** Множество узлов для подсветки при фильтрации по подразделению */
+  filterHighlightIds?: Set<string> | null;
 }
 
 // ─── Utilities ───────────────────────────────────────────────────
@@ -92,7 +94,6 @@ function easeInOutCubic(t: number): number {
 
 /**
  * Корректирует путь рёбра с учётом смещения перетаскиваемого узла.
- * Парсит строку "M x1 y1 L x2 y2" и смещает соответствующие координаты.
  */
 function getAdjustedEdgePath(edge: GraphEdge, dragOffset: DragOffset | null): string {
   if (!dragOffset) return edge.d;
@@ -417,7 +418,6 @@ function EdgeRenderer({ edge, isActive, isDimmed, zoomBoost, dragOffset }: EdgeR
   const bgStyle = EDGE_STYLES.background;
   const fgStyle = EDGE_STYLES.foreground;
 
-  // Корректируем путь рёбра, если оно связано с перетаскиваемым узлом
   const adjustedD = useMemo(
     () => getAdjustedEdgePath(edge, dragOffset),
     [edge.d, dragOffset]
@@ -707,7 +707,7 @@ function Tooltip({ node, view }: { node: GraphNode; view: ViewState }) {
 // ─── Main Component ──────────────────────────────────────────────
 
 const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props, ref) {
-  const { nodes, edges, bounds, selectedId, familySet, onSelect, isAdmin, onNodeDrag, companyLogo } = props;
+  const { nodes, edges, bounds, selectedId, familySet, onSelect, isAdmin, onNodeDrag, companyLogo, filterHighlightIds } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const nodeById = useRef(new Map<string, GraphNode>());
 
@@ -808,9 +808,18 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
     [canvasView]
   );
 
-  const isDimming = selectedId !== null;
+  // Логика подсветки: выбор узла ИЛИ фильтрация по подразделению
+  const isFilterActive = filterHighlightIds !== null && filterHighlightIds !== undefined;
+  const isDimming = selectedId !== null || isFilterActive;
+
   const isEdgeActive = (edge: GraphEdge) => {
+    // Режим выбора узла (приоритет)
     if (selectedId && familySet) return familySet.has(edge.from) && familySet.has(edge.to);
+    // Режим фильтрации по подразделению
+    if (isFilterActive && filterHighlightIds!.size > 0) {
+      return filterHighlightIds!.has(edge.from) || filterHighlightIds!.has(edge.to);
+    }
+    // Режим наведения
     if (pointerInteraction.hoverId) return edge.from === pointerInteraction.hoverId || edge.to === pointerInteraction.hoverId;
     return false;
   };
@@ -896,19 +905,26 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
             );
           })}
 
-          {uniqueNodes.map((node) => (
-            <NodeGlyph
-              key={node.id}
-              node={node}
-              hovered={pointerInteraction.hoverId === node.id}
-              selected={selectedId === node.id}
-              dimmed={isDimming && familySet ? !familySet.has(node.id) : false}
-              companyLogo={node.tier === "company" || node.tier === "root" ? companyLogo : undefined}
-              zoom={canvasView.view.k}
-              dragOffset={dragNode.dragOffset}
-              isDragging={dragNode.dragNodeId === node.id}
-            />
-          ))}
+          {uniqueNodes.map((node) => {
+            const isFilteredOut = isFilterActive && !filterHighlightIds!.has(node.id);
+            const shouldDim = selectedId && familySet
+              ? !familySet.has(node.id)
+              : isFilteredOut;
+
+            return (
+              <NodeGlyph
+                key={node.id}
+                node={node}
+                hovered={pointerInteraction.hoverId === node.id}
+                selected={selectedId === node.id}
+                dimmed={isDimming && shouldDim}
+                companyLogo={node.tier === "company" || node.tier === "root" ? companyLogo : undefined}
+                zoom={canvasView.view.k}
+                dragOffset={dragNode.dragOffset}
+                isDragging={dragNode.dragNodeId === node.id}
+              />
+            );
+          })}
         </g>
       </svg>
 
