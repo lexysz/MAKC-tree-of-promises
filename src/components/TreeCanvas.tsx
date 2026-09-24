@@ -1,16 +1,65 @@
 import { forwardRef, useImperativeHandle, useRef, useState, useEffect, useLayoutEffect, useMemo } from "react";
 import type { GraphBounds, GraphEdge, GraphNode } from "../lib/layout";
 
+// ─── Constants ───────────────────────────────────────────────────
+
+const ZOOM_MIN = 0.08;
+const ZOOM_MAX = 4;
+const ZOOM_SENSITIVITY = 0.00125;
+const FIT_PADDING = 0.85;
+const INITIAL_ZOOM_FACTOR = 0.45;
+const FIT_ANIMATION_DURATION = 620;
+const ZOOM_ANIMATION_DURATION = 320;
+const INITIAL_ANIMATION_DURATION = 1100;
+const FOCUS_ANIMATION_DURATION = 600;
+const CLICK_THRESHOLD = 7;
+const LOW_ZOOM_THRESHOLD = 0.3;
+const LOW_ZOOM_BOOST = 1.5;
+const GRID_SIZE = 5200;
+const CORE_HALO_RADIUS = 540;
+const DOT_GRID_SIZE = 34;
+
+const EDGE_STYLES = {
+  background: { width: { active: 18, inactive: 13 }, opacity: { active: 0.2, inactive: 0.08 } },
+  foreground: { width: { active: 5.2, inactive: 3.2 }, opacity: { active: 1, inactive: 0.42 } },
+} as const;
+
+const NODE_STYLES = {
+  company: { fontSize: 45, letterSpacing: "0.22em" },
+  value: { minFontSize: 44, maxFontSize: 100, lengthFactor: 0.65, maxWidthFactor: 1.6 },
+  root: { minFontSize: 18, maxFontSize: 33, lengthFactor: 0.55, widthFactor: 1.2 },
+} as const;
+
+// ─── Types ───────────────────────────────────────────────────────
+
 export interface TreeCanvasHandle {
   focusBranch: (ids: string[]) => void;
   fit: (animate?: boolean) => void;
   zoomBy: (factor: number) => void;
 }
 
-interface View {
+interface ViewState {
   x: number;
   y: number;
   k: number;
+}
+
+interface DragState {
+  nodeId: string;
+  startWorldX: number;
+  startWorldY: number;
+  nodeStartX: number;
+  nodeStartY: number;
+}
+
+interface PointerInfo {
+  x: number;
+  y: number;
+}
+
+interface DownInfo {
+  moved: number;
+  nodeId: string | null;
 }
 
 interface Props {
@@ -23,81 +72,612 @@ interface Props {
   isAdmin?: boolean;
   onNodeDrag?: (id: string, x: number, y: number) => void;
   companyLogo?: string;
-  zoom?: number;
 }
 
-const K_MIN = 0.08;
-const K_MAX = 4;
+// ─── Utilities ───────────────────────────────────────────────────
 
-function clampK(k: number) {
-  return Math.min(K_MAX, Math.max(K_MIN, k));
+function clampZoom(k: number): number {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, k));
 }
 
-function easeInOutCubic(t: number) {
+function easeInOutCubic(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-// Конвертация цвета (HSL или HEX) в RGB значения [0-1]
+/**
+ * Конвертирует цвет (HEX или HSL) в нормализованные RGB значения [0-1].
+ * Используется для SVG фильтров перекрашивания логотипа.
+ */
 function colorToRGB(color: string): [number, number, number] {
-  // Если цвет в формате HEX (#RRGGBB)
-  if (color.startsWith('#')) {
+  if (color.startsWith("#")) {
     return [
       parseInt(color.slice(1, 3), 16) / 255,
       parseInt(color.slice(3, 5), 16) / 255,
       parseInt(color.slice(5, 7), 16) / 255,
     ];
   }
-  
-  // Если цвет в формате HSL (hsl(hue, saturation%, lightness%))
-  if (color.startsWith('hsl')) {
+
+  if (color.startsWith("hsl")) {
     const match = color.match(/hsl\(([\d.]+),\s*([\d.]+)%,\s*([\d.]+)%\)/);
     if (match) {
       const h = parseFloat(match[1]) / 360;
       const s = parseFloat(match[2]) / 100;
       const l = parseFloat(match[3]) / 100;
-      
-      // Конвертация HSL в RGB
+
       const hue2rgb = (p: number, q: number, t: number) => {
         if (t < 0) t += 1;
         if (t > 1) t -= 1;
-        if (t < 1/6) return p + (q - p) * 6 * t;
-        if (t < 1/2) return q;
-        if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+        if (t < 1 / 6) return p + (q - p) * 6 * t;
+        if (t < 1 / 2) return q;
+        if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
         return p;
       };
-      
+
       const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
       const p = 2 * l - q;
-      
-      return [
-        hue2rgb(p, q, h + 1/3),
-        hue2rgb(p, q, h),
-        hue2rgb(p, q, h - 1/3),
-      ];
+
+      return [hue2rgb(p, q, h + 1 / 3), hue2rgb(p, q, h), hue2rgb(p, q, h - 1 / 3)];
     }
   }
-  
-  // По умолчанию - белый цвет
+
   return [1, 1, 1];
 }
 
-const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props, ref) {
-  const { nodes, edges, bounds, selectedId, familySet, onSelect, isAdmin, onNodeDrag, companyLogo, zoom = 1 } = props;
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState<View>({ x: 0, y: 0, k: 0.5 });
+// ─── Custom Hooks ────────────────────────────────────────────────
+
+/**
+ * Управляет состоянием вида камеры (позиция и зум) и анимациями.
+ */
+function useCanvasView(bounds: GraphBounds, containerRef: React.RefObject<HTMLDivElement | null>) {
+  const [view, setView] = useState<ViewState>({ x: 0, y: 0, k: 0.5 });
+  const viewRef = useRef(view);
+  const animRef = useRef<number | null>(null);
+
+  viewRef.current = view;
+
+  const stopAnimation = () => {
+    if (animRef.current !== null) {
+      cancelAnimationFrame(animRef.current);
+      animRef.current = null;
+    }
+  };
+
+  const animateTo = (target: ViewState, duration = 520) => {
+    stopAnimation();
+    const from = { ...viewRef.current };
+    const startTime = performance.now();
+
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startTime) / duration);
+      const eased = easeInOutCubic(progress);
+
+      setView({
+        x: from.x + (target.x - from.x) * eased,
+        y: from.y + (target.y - from.y) * eased,
+        k: from.k + (target.k - from.k) * eased,
+      });
+
+      if (progress < 1) {
+        animRef.current = requestAnimationFrame(tick);
+      } else {
+        animRef.current = null;
+      }
+    };
+
+    animRef.current = requestAnimationFrame(tick);
+  };
+
+  const calculateFitView = (): ViewState => {
+    const el = containerRef.current;
+    if (!el) return viewRef.current;
+
+    const width = el.clientWidth;
+    const height = el.clientHeight;
+    const boundsWidth = bounds.maxX - bounds.minX;
+    const boundsHeight = bounds.maxY - bounds.minY;
+
+    const zoom = clampZoom(Math.min((width * FIT_PADDING) / boundsWidth, (height * FIT_PADDING) / boundsHeight));
+    const centerX = (bounds.minX + bounds.maxX) / 2;
+    const centerY = (bounds.minY + bounds.maxY) / 2;
+
+    return { x: width / 2 - centerX * zoom, y: height / 2 - centerY * zoom, k: zoom };
+  };
+
+  const zoomAt = (px: number, py: number, factor: number, animate = false) => {
+    const v = viewRef.current;
+    const newZoom = clampZoom(v.k * factor);
+    const worldX = (px - v.x) / v.k;
+    const worldY = (py - v.y) / v.k;
+    const target = { x: px - worldX * newZoom, y: py - worldY * newZoom, k: newZoom };
+
+    if (animate) {
+      animateTo(target, ZOOM_ANIMATION_DURATION);
+    } else {
+      setView(target);
+    }
+  };
+
+  // Initial fit animation
+  useLayoutEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const target = calculateFitView();
+    setView({ x: target.x, y: target.y, k: target.k * INITIAL_ZOOM_FACTOR });
+    const raf = requestAnimationFrame(() => animateTo(target, INITIAL_ANIMATION_DURATION));
+
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
+  // Wheel zoom handler
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      stopAnimation();
+      const rect = el.getBoundingClientRect();
+      zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * ZOOM_SENSITIVITY));
+    };
+
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, []);
+
+  return {
+    view,
+    setView,
+    viewRef,
+    animateTo,
+    calculateFitView,
+    zoomAt,
+    stopAnimation,
+  };
+}
+
+/**
+ * Управляет взаимодействием с указателем: panning и hover.
+ */
+function usePointerInteraction(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  nodeById: React.MutableRefObject<Map<string, GraphNode>>,
+  isAdmin: boolean | undefined
+) {
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [isPanning, setIsPanning] = useState(false);
+  const pointers = useRef(new Map<number, PointerInfo>());
+  const downInfo = useRef<DownInfo | null>(null);
 
-  const viewRef = useRef(view);
-  viewRef.current = view;
-  const animRef = useRef<number | null>(null);
-  const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const downInfo = useRef<{ moved: number; nodeId: string | null } | null>(null);
-  const dragState = useRef<{ nodeId: string; startWorldX: number; startWorldY: number; nodeStartX: number; nodeStartY: number } | null>(null);
+  const handlePointerDown = (e: React.PointerEvent, onStartDrag: (nodeId: string) => void) => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    el.setPointerCapture(e.pointerId);
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (pointers.current.size === 1) {
+      const target = (e.target as Element).closest?.("[data-node]") ?? null;
+      const nodeId = target?.getAttribute("data-node") ?? null;
+      downInfo.current = { moved: 0, nodeId };
+
+      if (isAdmin && nodeId && nodeId !== "company-core") {
+        onStartDrag(nodeId);
+      } else {
+        setIsPanning(true);
+      }
+    }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent, onDrag: (dx: number, dy: number) => void) => {
+    const prev = pointers.current.get(e.pointerId);
+
+    if (!prev) {
+      if (e.pointerType === "mouse" && pointers.current.size === 0) {
+        const target = (e.target as Element).closest?.("[data-node]") ?? null;
+        setHoverId(target?.getAttribute("data-node") ?? null);
+      }
+      return;
+    }
+
+    const dx = e.clientX - prev.x;
+    const dy = e.clientY - prev.y;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    if (downInfo.current) {
+      downInfo.current.moved += Math.abs(dx) + Math.abs(dy);
+    }
+
+    onDrag(dx, dy);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent, onEndDrag: () => void, onSelect: (nodeId: string | null) => void) => {
+    const el = containerRef.current;
+    if (el?.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+    pointers.current.delete(e.pointerId);
+
+    if (pointers.current.size === 0) {
+      setIsPanning(false);
+      const info = downInfo.current;
+      downInfo.current = null;
+
+      onEndDrag();
+
+      if (info && info.moved < CLICK_THRESHOLD) {
+        onSelect(info.nodeId);
+      }
+    }
+  };
+
+  const handlePointerCancel = () => {
+    pointers.current.clear();
+    setIsPanning(false);
+    downInfo.current = null;
+  };
+
+  return {
+    hoverId,
+    setHoverId,
+    isPanning,
+    handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    handlePointerCancel,
+  };
+}
+
+/**
+ * Управляет перетаскиванием узлов для администраторов.
+ */
+function useDragNode(
+  containerRef: React.RefObject<HTMLDivElement | null>,
+  nodeById: React.MutableRefObject<Map<string, GraphNode>>,
+  viewRef: React.MutableRefObject<ViewState>,
+  onNodeDrag?: (id: string, x: number, y: number) => void
+) {
   const [dragNodeId, setDragNodeId] = useState<string | null>(null);
+  const dragState = useRef<DragState | null>(null);
+
+  const startDrag = (nodeId: string, clientX: number, clientY: number) => {
+    const el = containerRef.current;
+    const node = nodeById.current.get(nodeId);
+    if (!el || !node) return;
+
+    const v = viewRef.current;
+    const rect = el.getBoundingClientRect();
+    const worldX = (clientX - rect.left - v.x) / v.k;
+    const worldY = (clientY - rect.top - v.y) / v.k;
+
+    dragState.current = {
+      nodeId,
+      startWorldX: worldX,
+      startWorldY: worldY,
+      nodeStartX: node.x,
+      nodeStartY: node.y,
+    };
+    setDragNodeId(nodeId);
+  };
+
+  const updateDrag = (clientX: number, clientY: number) => {
+    if (!dragState.current) return;
+
+    const el = containerRef.current;
+    if (!el) return;
+
+    const v = viewRef.current;
+    const rect = el.getBoundingClientRect();
+    const worldX = (clientX - rect.left - v.x) / v.k;
+    const worldY = (clientY - rect.top - v.y) / v.k;
+
+    const deltaX = worldX - dragState.current.startWorldX;
+    const deltaY = worldY - dragState.current.startWorldY;
+
+    const node = nodeById.current.get(dragState.current.nodeId);
+    if (node) {
+      node.x = dragState.current.nodeStartX + deltaX;
+      node.y = dragState.current.nodeStartY + deltaY;
+      setDragNodeId(dragState.current.nodeId);
+    }
+  };
+
+  const endDrag = () => {
+    if (dragState.current && onNodeDrag) {
+      const node = nodeById.current.get(dragState.current.nodeId);
+      if (node) {
+        onNodeDrag(dragState.current.nodeId, node.x, node.y);
+      }
+    }
+    dragState.current = null;
+    setDragNodeId(null);
+  };
+
+  return { dragNodeId, startDrag, updateDrag, endDrag };
+}
+
+// ─── Sub-Components ──────────────────────────────────────────────
+
+function EdgeRenderer({ edge, isActive, isDimmed, zoomBoost }: { edge: GraphEdge; isActive: boolean; isDimmed: boolean; zoomBoost: number }) {
+  const bgStyle = EDGE_STYLES.background;
+  const fgStyle = EDGE_STYLES.foreground;
+
+  return (
+    <g className="edge-g" style={{ opacity: isDimmed ? 0.06 : 1 }}>
+      <path
+        d={edge.d}
+        pathLength={1}
+        className="edge-draw"
+        style={{ animationDelay: `${edge.delay}s` }}
+        fill="none"
+        stroke={edge.color}
+        strokeWidth={(isActive ? bgStyle.width.active : bgStyle.width.inactive) * zoomBoost}
+        strokeLinecap="round"
+        opacity={isActive ? bgStyle.opacity.active : bgStyle.opacity.inactive}
+      />
+      <path
+        d={edge.d}
+        pathLength={1}
+        className={`edge-draw ${isActive ? "edge-flow" : ""}`}
+        style={{ animationDelay: `${edge.delay}s` }}
+        fill="none"
+        stroke={edge.color}
+        strokeWidth={(isActive ? fgStyle.width.active : fgStyle.width.inactive) * zoomBoost}
+        strokeLinecap="round"
+        opacity={isActive ? fgStyle.opacity.active : fgStyle.opacity.inactive}
+      />
+    </g>
+  );
+}
+
+interface NodeGlyphProps {
+  node: GraphNode;
+  hovered: boolean;
+  selected: boolean;
+  dimmed: boolean;
+  companyLogo?: string;
+  zoom: number;
+}
+
+function NodeGlyph({ node, hovered, selected, dimmed, companyLogo, zoom }: NodeGlyphProps) {
+  const { tier, r, color, short, delay } = node;
+  const lines = tier === "root" ? short.split(" ") : [];
+
+  const renderCompanyTier = () => (
+    <>
+      <circle r={r + 44} fill="none" stroke="rgba(143,182,192,0.25)" strokeWidth={2} strokeDasharray="2 12" className="ring-spin" />
+      <circle r={r} className="pulse-ring" fill="none" stroke="rgba(242,180,90,0.5)" strokeWidth={3} />
+      <circle r={r} fill="#0e2029" stroke="#8fb6c0" strokeWidth={4} />
+      {companyLogo ? (
+        <image
+          href={companyLogo}
+          x={-r * 0.7}
+          y={-r * 0.7}
+          width={r * 1.4}
+          height={r * 1.4}
+          preserveAspectRatio="xMidYMid meet"
+          clipPath="circle(100%)"
+        />
+      ) : (
+        <>
+          <circle r={8.4} fill="#eaf4f2" opacity={0.92} />
+          {[
+            { a: -90, c: "#43d6b5" },
+            { a: 30, c: "#f2b45a" },
+            { a: 150, c: "#f2836b" },
+          ].map(({ a, c }) => {
+            const rad = (a * Math.PI) / 180;
+            const x2 = Math.cos(rad) * 38;
+            const y2 = Math.sin(rad) * 38;
+            return (
+              <g key={a}>
+                <line x1={Math.cos(rad) * 12} y1={Math.sin(rad) * 12} x2={Math.cos(rad) * 30} y2={Math.sin(rad) * 30} stroke="#8fb6c0" strokeWidth={2.6} opacity={0.7} />
+                <circle cx={x2} cy={y2} r={6.8} fill={c} />
+              </g>
+            );
+          })}
+        </>
+      )}
+      <text
+        y={r + 48}
+        textAnchor="middle"
+        fontSize={NODE_STYLES.company.fontSize}
+        letterSpacing={NODE_STYLES.company.letterSpacing}
+        fill="#93abb2"
+        style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}
+      >
+        {short.toUpperCase()}
+      </text>
+    </>
+  );
+
+  const renderValueTier = () => {
+    const { minFontSize, maxFontSize, lengthFactor, maxWidthFactor } = NODE_STYLES.value;
+    const fontSize = Math.min(maxFontSize, Math.max(minFontSize, (r * 3) / (short.length * lengthFactor)));
+    const maxWidth = r * maxWidthFactor;
+    const words = short.split(" ");
+    const textLines: string[] = [];
+    let currentLine = "";
+
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      const testWidth = testLine.length * fontSize * 0.5;
+
+      if (testWidth > maxWidth && currentLine) {
+        textLines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) textLines.push(currentLine);
+
+    const lineHeight = fontSize * 1.2;
+    const totalHeight = textLines.length * lineHeight;
+    const startY = -(totalHeight / 2) + lineHeight / 2;
+
+    return (
+      <>
+        <circle r={r + 60} fill={color} opacity={hovered || selected ? 0.13 : 0.07} />
+        <circle r={r + 30} fill="none" stroke={color} strokeWidth={3.6} strokeDasharray="9 27" opacity={0.5} className="ring-spin" />
+        <circle r={r} fill="#0d1b24" stroke={color} strokeWidth={7.8} />
+        <circle r={r - 21} fill="none" stroke={color} strokeWidth={3} opacity={0.22} />
+        {textLines.map((line, i) => (
+          <text
+            key={i}
+            y={startY + i * lineHeight}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={fontSize}
+            fill="#eaf4f2"
+            style={{ fontFamily: "var(--font-display)", fontWeight: 500, letterSpacing: "0.01em" }}
+          >
+            {line}
+          </text>
+        ))}
+      </>
+    );
+  };
+
+  const renderRootTier = () => {
+    const [rColor, gColor, bColor] = colorToRGB(color);
+
+    const renderWithLogo = () => (
+      <>
+        <defs>
+          <filter id={`recolor-${node.id}`}>
+            <feColorMatrix
+              type="matrix"
+              values={`0 0 0 0 ${rColor}
+                       0 0 0 0 ${gColor}
+                       0 0 0 0 ${bColor}
+                       0 0 0 1 0`}
+            />
+          </filter>
+        </defs>
+        <image
+          href={companyLogo!}
+          x={-r * 0.5}
+          y={-r * 0.5}
+          width={r}
+          height={r}
+          preserveAspectRatio="xMidYMid meet"
+          filter={`url(#recolor-${node.id})`}
+          opacity={0.9}
+        />
+      </>
+    );
+
+    const renderWithoutLogo = () => {
+      const { minFontSize, maxFontSize, lengthFactor, widthFactor } = NODE_STYLES.root;
+      const fontSize = Math.min(maxFontSize, Math.max(minFontSize, (r * widthFactor) / (short.length * lengthFactor)));
+
+      if (lines.length === 1) {
+        return (
+          <text y={7} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#eaf4f2" style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}>
+            {lines[0]}
+          </text>
+        );
+      }
+
+      return lines.map((ln, i) => (
+        <text key={i} y={i === 0 ? -12 : 24} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#eaf4f2" style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}>
+          {ln}
+        </text>
+      ));
+    };
+
+    return (
+      <>
+        <circle r={r + 22} fill={color} opacity={hovered || selected ? 0.14 : 0.06} />
+        <circle r={r} fill="#0d1b24" stroke={color} strokeWidth={4.2} />
+        {companyLogo ? renderWithLogo() : renderWithoutLogo()}
+      </>
+    );
+  };
+
+  const renderSupportTier = () => (
+    <>
+      <circle r={r + 16} fill={color} opacity={hovered || selected ? 0.16 : 0} />
+      <circle r={r} fill="#0d1b24" stroke={color} strokeWidth={3.4} opacity={0.95} />
+      <circle r={8.8} fill={color} opacity={0.9} />
+    </>
+  );
+
+  const renderTierContent = () => {
+    switch (tier) {
+      case "company":
+        return renderCompanyTier();
+      case "value":
+        return renderValueTier();
+      case "root":
+        return renderRootTier();
+      case "support":
+        return renderSupportTier();
+      default:
+        return null;
+    }
+  };
+
+  const selectedRadius = r + (tier === "value" ? 34 : tier === "company" ? 24 : 16);
+
+  return (
+    <g
+      data-node={node.id}
+      transform={`translate(${node.x} ${node.y})`}
+      className="node-g cursor-pointer"
+      style={{ opacity: dimmed ? 0.16 : 1 }}
+    >
+      <g className="node-pop" style={{ animationDelay: `${delay}s` }}>
+        <circle r={r + 10} fill="rgba(0,0,0,0)" />
+        {renderTierContent()}
+        {selected && (
+          <circle r={selectedRadius} fill="none" stroke={color} strokeWidth={3.2} strokeDasharray="10 14" opacity={0.95} className="ring-spin-rev" />
+        )}
+        {hovered && !selected && <circle r={r + 10} fill="none" stroke={color} strokeWidth={2.8} opacity={0.6} />}
+      </g>
+    </g>
+  );
+}
+
+function Tooltip({ node, view }: { node: GraphNode; view: ViewState }) {
+  const tierLabel =
+    node.tier === "value"
+      ? "ценность"
+      : node.tier === "root"
+        ? "корневое обещание"
+        : node.tier === "support"
+          ? "поддерживающее"
+          : "ядро";
+
+  return (
+    <div
+      className="pointer-events-none absolute z-20 max-w-[240px] rounded-lg border bg-ink-900/95 px-3 py-2 shadow-xl shadow-black/40 backdrop-blur-sm"
+      style={{
+        left: node.x * view.k + view.x,
+        top: (node.y - node.r - 12) * view.k + view.y,
+        transform: "translate(-50%, -100%)",
+        borderColor: `${node.color}55`,
+      }}
+    >
+      <div className="flex items-center gap-2">
+        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: node.color }} />
+        <span className="text-[13px] font-semibold text-mist-100">{node.title}</span>
+      </div>
+      <div className="mt-0.5 pl-4 text-[10.5px] font-medium uppercase tracking-[0.14em] text-mist-500">
+        {tierLabel}
+        <span className="normal-case tracking-normal"> · клик — карточка</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ──────────────────────────────────────────────
+
+const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props, ref) {
+  const { nodes, edges, bounds, selectedId, familySet, onSelect, isAdmin, onNodeDrag, companyLogo } = props;
+  const containerRef = useRef<HTMLDivElement>(null);
   const nodeById = useRef(new Map<string, GraphNode>());
-  
-  // Удаляем дубликаты узлов, сохраняя первый встреченный
+
+  // Deduplicate nodes
   const uniqueNodes = useMemo(() => {
     const seen = new Map<string, GraphNode>();
     nodes.forEach((n) => {
@@ -109,262 +689,143 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
     });
     return Array.from(seen.values());
   }, [nodes]);
-  
+
   nodeById.current = new Map(uniqueNodes.map((n) => [n.id, n]));
 
+  // Calculate ring radii for visual guides
   const ringRadii = useMemo(() => {
-    const valueNodes = uniqueNodes.filter((n) => n.tier === "value");
-    const rootNodes = uniqueNodes.filter((n) => n.tier === "root");
-    const supportNodes = uniqueNodes.filter((n) => n.tier === "support");
-
-    const avgRadius = (nds: GraphNode[]) => {
-      if (nds.length === 0) return 0;
-      const sum = nds.reduce((s, n) => s + Math.hypot(n.x, n.y), 0);
-      return sum / nds.length;
+    const calculateAverageRadius = (tierNodes: GraphNode[]) => {
+      if (tierNodes.length === 0) return 0;
+      const sum = tierNodes.reduce((s, n) => s + Math.hypot(n.x, n.y), 0);
+      return sum / tierNodes.length;
     };
 
-    return [avgRadius(valueNodes), avgRadius(rootNodes), avgRadius(supportNodes)];
+    return [
+      calculateAverageRadius(uniqueNodes.filter((n) => n.tier === "value")),
+      calculateAverageRadius(uniqueNodes.filter((n) => n.tier === "root")),
+      calculateAverageRadius(uniqueNodes.filter((n) => n.tier === "support")),
+    ];
   }, [uniqueNodes]);
 
+  // Initialize hooks
+  const canvasView = useCanvasView(bounds, containerRef);
+  const pointerInteraction = usePointerInteraction(containerRef, nodeById, isAdmin);
+  const dragNode = useDragNode(containerRef, nodeById, canvasView.viewRef, onNodeDrag);
 
+  // Expose imperative API
+  useImperativeHandle(
+    ref,
+    () => ({
+      fit: (animate = true) => {
+        const target = canvasView.calculateFitView();
+        if (animate) {
+          canvasView.animateTo(target, FIT_ANIMATION_DURATION);
+        } else {
+          canvasView.setView(target);
+        }
+      },
+      zoomBy: (factor: number) => {
+        const el = containerRef.current;
+        if (!el) return;
+        canvasView.zoomAt(el.clientWidth / 2, el.clientHeight / 2, factor, true);
+      },
+      focusBranch: (ids: string[]) => {
+        const el = containerRef.current;
+        if (!el || ids.length === 0) return;
 
-  function stopAnim() {
-    if (animRef.current !== null) cancelAnimationFrame(animRef.current);
-    animRef.current = null;
-  }
+        const branchNodes = ids.map((id) => nodeById.current.get(id)).filter((n): n is GraphNode => n !== undefined);
+        if (branchNodes.length === 0) return;
 
-  function animateTo(target: View, dur = 520) {
-    stopAnim();
-    const from = { ...viewRef.current };
-    const t0 = performance.now();
-    const tick = (now: number) => {
-      const p = Math.min(1, (now - t0) / dur);
-      const e = easeInOutCubic(p);
-      setView({
-        x: from.x + (target.x - from.x) * e,
-        y: from.y + (target.y - from.y) * e,
-        k: from.k + (target.k - from.k) * e,
-      });
-      if (p < 1) animRef.current = requestAnimationFrame(tick);
-      else animRef.current = null;
-    };
-    animRef.current = requestAnimationFrame(tick);
-  }
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
 
-  function fitTarget(): View {
-    const el = containerRef.current;
-    if (!el) return viewRef.current;
-    const w = el.clientWidth;
-    const h = el.clientHeight;
-    const bw = bounds.maxX - bounds.minX;
-    const bh = bounds.maxY - bounds.minY;
-    const k = clampK(Math.min((w * 0.85) / bw, (h * 0.85) / bh));
-    const cx = (bounds.minX + bounds.maxX) / 2;
-    const cy = (bounds.minY + bounds.maxY) / 2;
-    return { x: w / 2 - cx * k, y: h / 2 - cy * k, k };
-  }
+        for (const nd of branchNodes) {
+          minX = Math.min(minX, nd.x - nd.r);
+          minY = Math.min(minY, nd.y - nd.r);
+          maxX = Math.max(maxX, nd.x + nd.r);
+          maxY = Math.max(maxY, nd.y + nd.r);
+        }
 
-  function zoomAt(px: number, py: number, factor: number, animate = false) {
-    const v = viewRef.current;
-    const k = clampK(v.k * factor);
-    const wx = (px - v.x) / v.k;
-    const wy = (py - v.y) / v.k;
-    const target = { x: px - wx * k, y: py - wy * k, k };
-    if (animate) animateTo(target, 320);
-    else setView(target);
-  }
+        const boxCenterX = (minX + maxX) / 2;
+        const boxCenterY = (minY + maxY) / 2;
+        const boxWidth = maxX - minX;
+        const boxHeight = maxY - minY;
 
-  useImperativeHandle(ref, () => ({
-    fit: (animate = true) => {
-      const t = fitTarget();
-      if (animate) animateTo(t, 620);
-      else setView(t);
-    },
-    zoomBy: (factor: number) => {
-      const el = containerRef.current;
-      if (!el) return;
-      zoomAt(el.clientWidth / 2, el.clientHeight / 2, factor, true);
-    },
-    focusBranch: (ids: string[]) => {
-      const el = containerRef.current;
-      if (!el || ids.length === 0) return;
+        const width = el.clientWidth;
+        const height = el.clientHeight;
+        const isDesktop = width >= 1024;
+        const availableWidth = isDesktop ? width * 0.5 : width;
+        const centerX = isDesktop ? width * 0.25 : width * 0.5;
+        const centerY = height * 0.5;
 
-      const branchNodes = ids.map((id) => nodeById.current.get(id)).filter((n): n is GraphNode => n !== undefined);
-      if (branchNodes.length === 0) return;
+        const padding = isDesktop ? 80 : 60;
+        const scaleX = (availableWidth - padding * 2) / boxWidth;
+        const scaleY = (height - padding * 2) / boxHeight;
+        const targetZoom = clampZoom(Math.min(Math.min(scaleX, scaleY), 2.5));
 
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-      for (const nd of branchNodes) {
-        minX = Math.min(minX, nd.x - nd.r);
-        minY = Math.min(minY, nd.y - nd.r);
-        maxX = Math.max(maxX, nd.x + nd.r);
-        maxY = Math.max(maxY, nd.y + nd.r);
-      }
+        canvasView.animateTo(
+          {
+            x: centerX - boxCenterX * targetZoom,
+            y: centerY - boxCenterY * targetZoom,
+            k: targetZoom,
+          },
+          FOCUS_ANIMATION_DURATION
+        );
+      },
+    }),
+    [canvasView]
+  );
 
-      const boxCenterX = (minX + maxX) / 2;
-      const boxCenterY = (minY + maxY) / 2;
-      const boxWidth = maxX - minX;
-      const boxHeight = maxY - minY;
-
-      const w = el.clientWidth;
-      const h = el.clientHeight;
-      const isDesktop = w >= 1024;
-      const availableWidth = isDesktop ? w * 0.5 : w;
-      const centerX = isDesktop ? w * 0.25 : w * 0.5;
-      const centerY = h * 0.5;
-
-      const padding = isDesktop ? 80 : 60;
-      const scaleX = (availableWidth - padding * 2) / boxWidth;
-      const scaleY = (h - padding * 2) / boxHeight;
-      let targetK = clampK(Math.min(Math.min(scaleX, scaleY), 2.5));
-
-      animateTo({ x: centerX - boxCenterX * targetK, y: centerY - boxCenterY * targetK, k: targetK }, 600);
-    },
-  }));
-
-  useLayoutEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const t = fitTarget();
-    setView({ x: t.x, y: t.y, k: t.k * 0.45 });
-    const raf = requestAnimationFrame(() => animateTo(t, 1100));
-    return () => cancelAnimationFrame(raf);
-  }, []);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      stopAnim();
-      const rect = el.getBoundingClientRect();
-      zoomAt(e.clientX - rect.left, e.clientY - rect.top, Math.exp(-e.deltaY * 0.00125));
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
-  }, []);
-
-  const dimming = selectedId !== null;
-  function edgeActive(ed: GraphEdge): boolean {
-    if (selectedId && familySet) return familySet.has(ed.from) && familySet.has(ed.to);
-    if (hoverId) return ed.from === hoverId || ed.to === hoverId;
+  const isDimming = selectedId !== null;
+  const isEdgeActive = (edge: GraphEdge) => {
+    if (selectedId && familySet) return familySet.has(edge.from) && familySet.has(edge.to);
+    if (pointerInteraction.hoverId) return edge.from === pointerInteraction.hoverId || edge.to === pointerInteraction.hoverId;
     return false;
-  }
+  };
 
-  const hoverNode = hoverId ? nodeById.current.get(hoverId) : undefined;
+  const zoomBoost = canvasView.view.k < LOW_ZOOM_THRESHOLD ? LOW_ZOOM_BOOST : 1;
+  const hoverNode = pointerInteraction.hoverId ? nodeById.current.get(pointerInteraction.hoverId) : undefined;
+
+  // Event handlers
+  const handlePointerDown = (e: React.PointerEvent) => {
+    canvasView.stopAnimation();
+    pointerInteraction.handlePointerDown(e, (nodeId) => dragNode.startDrag(nodeId, e.clientX, e.clientY));
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    pointerInteraction.handlePointerMove(e, (dx, dy) => {
+      if (dragNode.dragNodeId && isAdmin) {
+        dragNode.updateDrag(e.clientX, e.clientY);
+      } else {
+        canvasView.setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
+      }
+    });
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    pointerInteraction.handlePointerUp(e, dragNode.endDrag, onSelect);
+  };
+
+  const handlePointerCancel = () => {
+    pointerInteraction.handlePointerCancel();
+    dragNode.endDrag();
+  };
 
   return (
     <div
       ref={containerRef}
-      className={`relative h-full w-full overflow-hidden touch-none select-none ${isPanning ? "cursor-grabbing" : "cursor-grab"}`}
-      onPointerDown={(e) => {
-        const el = containerRef.current;
-        if (!el) return;
-        el.setPointerCapture(e.pointerId);
-        pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        
-        if (pointers.current.size === 1) {
-          stopAnim();
-          const target = (e.target as Element).closest?.("[data-node]") ?? null;
-          const nodeId = target?.getAttribute("data-node") ?? null;
-          downInfo.current = { moved: 0, nodeId };
-          
-          // Если админ и клик по узлу - начинаем drag
-          if (isAdmin && nodeId && nodeId !== "company-core") {
-            const node = nodeById.current.get(nodeId);
-            if (node) {
-              const v = viewRef.current;
-              const worldX = (e.clientX - el.getBoundingClientRect().left - v.x) / v.k;
-              const worldY = (e.clientY - el.getBoundingClientRect().top - v.y) / v.k;
-              dragState.current = {
-                nodeId,
-                startWorldX: worldX,
-                startWorldY: worldY,
-                nodeStartX: node.x,
-                nodeStartY: node.y,
-              };
-              setDragNodeId(nodeId);
-            }
-          } else {
-            setIsPanning(true);
-          }
-        }
-      }}
-      onPointerMove={(e) => {
-        const prev = pointers.current.get(e.pointerId);
-        if (!prev) {
-          if (e.pointerType === "mouse" && pointers.current.size === 0) {
-            const target = (e.target as Element).closest?.("[data-node]") ?? null;
-            setHoverId(target?.getAttribute("data-node") ?? null);
-          }
-          return;
-        }
-
-        const dx = e.clientX - prev.x;
-        const dy = e.clientY - prev.y;
-        pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        if (downInfo.current) downInfo.current.moved += Math.abs(dx) + Math.abs(dy);
-
-        // Если drag - обновляем позицию узла
-        if (dragState.current && isAdmin) {
-          const el = containerRef.current;
-          if (!el) return;
-          const v = viewRef.current;
-          const rect = el.getBoundingClientRect();
-          const worldX = (e.clientX - rect.left - v.x) / v.k;
-          const worldY = (e.clientY - rect.top - v.y) / v.k;
-          
-          const deltaX = worldX - dragState.current.startWorldX;
-          const deltaY = worldY - dragState.current.startWorldY;
-          
-          const newX = dragState.current.nodeStartX + deltaX;
-          const newY = dragState.current.nodeStartY + deltaY;
-          
-          const node = nodeById.current.get(dragState.current.nodeId);
-          if (node) {
-            node.x = newX;
-            node.y = newY;
-            setDragNodeId(dragState.current.nodeId);
-          }
-        } else {
-          setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
-        }
-      }}
-      onPointerUp={(e) => {
-        const el = containerRef.current;
-        if (el?.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
-        pointers.current.delete(e.pointerId);
-        
-        if (pointers.current.size === 0) {
-          setIsPanning(false);
-          const info = downInfo.current;
-          downInfo.current = null;
-          
-          // Если был drag - сохраняем позицию
-          if (dragState.current && isAdmin && onNodeDrag) {
-            const node = nodeById.current.get(dragState.current.nodeId);
-            if (node) {
-              onNodeDrag(dragState.current.nodeId, node.x, node.y);
-            }
-          }
-          
-          dragState.current = null;
-          setDragNodeId(null);
-          
-          if (info && info.moved < 7) onSelect(info.nodeId);
-        }
-      }}
-      onPointerCancel={() => {
-        pointers.current.clear();
-        setIsPanning(false);
-        downInfo.current = null;
-        dragState.current = null;
-        setDragNodeId(null);
-      }}
-      onPointerLeave={() => setHoverId(null)}
+      className={`relative h-full w-full overflow-hidden touch-none select-none ${pointerInteraction.isPanning ? "cursor-grabbing" : "cursor-grab"}`}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerCancel}
+      onPointerLeave={() => pointerInteraction.setHoverId(null)}
     >
       <svg className="block h-full w-full">
         <defs>
-          <pattern id="dotGrid" width="34" height="34" patternUnits="userSpaceOnUse">
+          <pattern id="dotGrid" width={DOT_GRID_SIZE} height={DOT_GRID_SIZE} patternUnits="userSpaceOnUse">
             <circle cx="1.3" cy="1.3" r="1.15" fill="rgba(147,171,178,0.11)" />
           </pattern>
           <radialGradient id="coreHalo">
@@ -374,8 +835,8 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
           </radialGradient>
         </defs>
 
-        <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-          <rect x={-2600} y={-2600} width={5200} height={5200} fill="url(#dotGrid)" />
+        <g transform={`translate(${canvasView.view.x} ${canvasView.view.y}) scale(${canvasView.view.k})`}>
+          <rect x={-GRID_SIZE / 2} y={-GRID_SIZE / 2} width={GRID_SIZE} height={GRID_SIZE} fill="url(#dotGrid)" />
 
           {ringRadii.map((r, i) => (
             <circle
@@ -389,299 +850,31 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
               strokeDasharray={i === 2 ? "2 10" : "1 7"}
             />
           ))}
-          <circle cx={0} cy={0} r={540} fill="url(#coreHalo)" />
+          <circle cx={0} cy={0} r={CORE_HALO_RADIUS} fill="url(#coreHalo)" />
 
-          {edges.map((ed) => {
-            const active = edgeActive(ed);
-            const dim = dimming && !active;
-            // Усиливаем контраст линий при низком zoom
-            const zoomBoost = view.k < 0.3 ? 1.5 : 1;
-            return (
-              <g key={ed.id} className="edge-g" style={{ opacity: dim ? 0.06 : 1 }}>
-                <path
-                  d={ed.d}
-                  pathLength={1}
-                  className="edge-draw"
-                  style={{ animationDelay: `${ed.delay}s` }}
-                  fill="none"
-                  stroke={ed.color}
-                  strokeWidth={(active ? 18 : 13) * zoomBoost}
-                  strokeLinecap="round"
-                  opacity={active ? 0.2 : 0.08}
-                />
-                <path
-                  d={ed.d}
-                  pathLength={1}
-                  className={`edge-draw ${active ? "edge-flow" : ""}`}
-                  style={{ animationDelay: `${ed.delay}s` }}
-                  fill="none"
-                  stroke={ed.color}
-                  strokeWidth={(active ? 5.2 : 3.2) * zoomBoost}
-                  strokeLinecap="round"
-                  opacity={active ? 1 : 0.42}
-                />
-              </g>
-            );
+          {edges.map((edge) => {
+            const active = isEdgeActive(edge);
+            const dimmed = isDimming && !active;
+            return <EdgeRenderer key={edge.id} edge={edge} isActive={active} isDimmed={dimmed} zoomBoost={zoomBoost} />;
           })}
 
-          {uniqueNodes.map((nd) => (
+          {uniqueNodes.map((node) => (
             <NodeGlyph
-              key={nd.id}
-              node={nd}
-              hovered={hoverId === nd.id}
-              selected={selectedId === nd.id}
-              dimmed={dimming && familySet ? !familySet.has(nd.id) : false}
-              companyLogo={(nd.tier === "company" || nd.tier === "root") ? companyLogo : undefined}
-              zoom={view.k}
+              key={node.id}
+              node={node}
+              hovered={pointerInteraction.hoverId === node.id}
+              selected={selectedId === node.id}
+              dimmed={isDimming && familySet ? !familySet.has(node.id) : false}
+              companyLogo={node.tier === "company" || node.tier === "root" ? companyLogo : undefined}
+              zoom={canvasView.view.k}
             />
           ))}
         </g>
       </svg>
 
-      {(() => {
-        const hoverNode = hoverId ? nodeById.current.get(hoverId) : undefined;
-        if (!hoverNode || isPanning) return null;
-        return (
-        <div
-          className="pointer-events-none absolute z-20 max-w-[240px] rounded-lg border bg-ink-900/95 px-3 py-2 shadow-xl shadow-black/40 backdrop-blur-sm"
-          style={{
-            left: hoverNode.x * view.k + view.x,
-            top: (hoverNode.y - hoverNode.r - 12) * view.k + view.y,
-            transform: "translate(-50%, -100%)",
-            borderColor: `${hoverNode.color}55`,
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: hoverNode.color }} />
-            <span className="text-[13px] font-semibold text-mist-100">{hoverNode.title}</span>
-          </div>
-          <div className="mt-0.5 pl-4 text-[10.5px] font-medium uppercase tracking-[0.14em] text-mist-500">
-            {hoverNode.tier === "value" ? "ценность" : hoverNode.tier === "root" ? "корневое обещание" : hoverNode.tier === "support" ? "поддерживающее" : "ядро"}
-            <span className="normal-case tracking-normal"> · клик — карточка</span>
-          </div>
-        </div>
-        );
-      })()}
+      {hoverNode && !pointerInteraction.isPanning && <Tooltip node={hoverNode} view={canvasView.view} />}
     </div>
   );
 });
-
-function NodeGlyph({
-  node,
-  hovered,
-  selected,
-  dimmed,
-  companyLogo,
-  zoom,
-}: {
-  node: GraphNode;
-  hovered: boolean;
-  selected: boolean;
-  dimmed: boolean;
-  companyLogo?: string;
-  zoom?: number;
-}) {
-  const { tier, r, color, short } = node;
-  const lines = tier === "root" ? short.split(" ") : [];
-
-  return (
-    <g
-      data-node={node.id}
-      transform={`translate(${node.x} ${node.y})`}
-      className="node-g cursor-pointer"
-      style={{ opacity: dimmed ? 0.16 : 1 }}
-    >
-      <g className="node-pop" style={{ animationDelay: `${node.delay}s` }}>
-        <circle r={r + 10} fill="rgba(0,0,0,0)" />
-
-        {tier === "company" && (
-          <>
-            <circle r={r + 44} fill="none" stroke="rgba(143,182,192,0.25)" strokeWidth={2} strokeDasharray="2 12" className="ring-spin" />
-            <circle r={r} className="pulse-ring" fill="none" stroke="rgba(242,180,90,0.5)" strokeWidth={3} />
-            <circle r={r} fill="#0e2029" stroke="#8fb6c0" strokeWidth={4} />
-            {companyLogo ? (
-              <image
-                href={companyLogo}
-                x={-r * 0.7}
-                y={-r * 0.7}
-                width={r * 1.4}
-                height={r * 1.4}
-                preserveAspectRatio="xMidYMid meet"
-                clipPath="circle(100%)"
-              />
-            ) : (
-              <>
-                <circle r={8.4} fill="#eaf4f2" opacity={0.92} />
-                {[
-                  { a: -90, c: "#43d6b5" },
-                  { a: 30, c: "#f2b45a" },
-                  { a: 150, c: "#f2836b" },
-                ].map(({ a, c }) => {
-                  const rad = (a * Math.PI) / 180;
-                  const x2 = Math.cos(rad) * 38;
-                  const y2 = Math.sin(rad) * 38;
-                  return (
-                    <g key={a}>
-                      <line x1={Math.cos(rad) * 12} y1={Math.sin(rad) * 12} x2={Math.cos(rad) * 30} y2={Math.sin(rad) * 30} stroke="#8fb6c0" strokeWidth={2.6} opacity={0.7} />
-                      <circle cx={x2} cy={y2} r={6.8} fill={c} />
-                    </g>
-                  );
-                })}
-              </>
-            )}
-            <text
-              y={r + 48}
-              textAnchor="middle"
-              fontSize={45}
-              letterSpacing="0.22em"
-              fill="#93abb2"
-              style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}
-            >
-              {short.toUpperCase()}
-            </text>
-
-          </>
-        )}
-
-        {tier === "value" && (
-          <>
-            <circle r={r + 60} fill={color} opacity={hovered || selected ? 0.13 : 0.07} />
-            <circle r={r + 30} fill="none" stroke={color} strokeWidth={3.6} strokeDasharray="9 27" opacity={0.5} className="ring-spin" />
-            <circle r={r} fill="#0d1b24" stroke={color} strokeWidth={7.8} />
-            <circle r={r - 21} fill="none" stroke={color} strokeWidth={3} opacity={0.22} />
-            {(() => {
-              // Вычисляем размер шрифта и разбиваем текст на строки
-              const maxFontSize = 100;
-              const minFontSize = 44;
-              const fontSize = Math.min(maxFontSize, Math.max(minFontSize, (r * 3) / (short.length * 0.65)));
-              
-              // Разбиваем текст на строки если он слишком длинный
-              const maxWidth = r * 1.6; // Максимальная ширина текста
-              const words = short.split(' ');
-              const lines: string[] = [];
-              let currentLine = '';
-              
-              for (const word of words) {
-                const testLine = currentLine ? `${currentLine} ${word}` : word;
-                const testWidth = testLine.length * fontSize * 0.5; // Примерная ширина
-                
-                if (testWidth > maxWidth && currentLine) {
-                  lines.push(currentLine);
-                  currentLine = word;
-                } else {
-                  currentLine = testLine;
-                }
-              }
-              if (currentLine) lines.push(currentLine);
-              
-              // Центрируем текст вертикально
-              const lineHeight = fontSize * 1.2;
-              const totalHeight = lines.length * lineHeight;
-              const startY = -(totalHeight / 2) + lineHeight / 2;
-              
-              return lines.map((line, i) => (
-                <text
-                  key={i}
-                  y={startY + i * lineHeight}
-                  textAnchor="middle"
-                  dominantBaseline="middle"
-                  fontSize={fontSize}
-                  fill="#eaf4f2"
-                  style={{ fontFamily: "var(--font-display)", fontWeight: 500, letterSpacing: "0.01em" }}
-                >
-                  {line}
-                </text>
-              ));
-            })()}
-
-          </>
-        )}
-
-        {tier === "root" && (
-          <>
-            <circle r={r + 22} fill={color} opacity={hovered || selected ? 0.14 : 0.06} />
-            <circle r={r} fill="#0d1b24" stroke={color} strokeWidth={4.2} />
-            
-            {/* Логотип компании с перекрашиванием в цвет ветки */}
-            {companyLogo ? (
-              <>
-                {(() => {
-                  const [r, g, b] = colorToRGB(color);
-                  return (
-                    <defs>
-                      <filter id={`recolor-${node.id}`}>
-                        <feColorMatrix
-                          type="matrix"
-                          values={`0 0 0 0 ${r}
-                                   0 0 0 0 ${g}
-                                   0 0 0 0 ${b}
-                                   0 0 0 1 0`}
-                        />
-                      </filter>
-                    </defs>
-                  );
-                })()}
-                <image
-                  href={companyLogo}
-                   x={-r * 0.5}
-                  y={-r * 0.5}
-                  width={r}
-                  height={r}
-                  preserveAspectRatio="xMidYMid meet"
-                  filter={`url(#recolor-${node.id})`}
-                  opacity={0.9}
-                />
-              </>
-            ) : (
-              /* Fallback: текст если нет логотипа */
-              (() => {
-                const maxFontSize = 33;
-                const minFontSize = 18;
-                const fontSize = Math.min(maxFontSize, Math.max(minFontSize, (r * 1.2) / (short.length * 0.55)));
-                
-                if (lines.length === 1) {
-                  return (
-                    <text y={7} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#eaf4f2" style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}>
-                      {lines[0]}
-                    </text>
-                  );
-                } else {
-                  return lines.map((ln, i) => (
-                    <text key={i} y={i === 0 ? -12 : 24} textAnchor="middle" dominantBaseline="middle" fontSize={fontSize} fill="#eaf4f2" style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}>
-                      {ln}
-                    </text>
-                  ));
-                }
-              })()
-            )}
-          </>
-        )}
-
-        {tier === "support" && (
-          <>
-            <circle r={r + 16} fill={color} opacity={hovered || selected ? 0.16 : 0} />
-            <circle r={r} fill="#0d1b24" stroke={color} strokeWidth={3.4} opacity={0.95} />
-            <circle r={8.8} fill={color} opacity={0.9} />
-          </>
-        )}
-
-        {selected && (
-          <circle
-            r={r + (tier === "value" ? 34 : tier === "company" ? 24 : 16)}
-            fill="none"
-            stroke={color}
-            strokeWidth={3.2}
-            strokeDasharray="10 14"
-            opacity={0.95}
-            className="ring-spin-rev"
-          />
-        )}
-        {hovered && !selected && (
-          <circle r={r + 10} fill="none" stroke={color} strokeWidth={2.8} opacity={0.6} />
-        )}
-      </g>
-    </g>
-  );
-}
 
 export default TreeCanvas;
