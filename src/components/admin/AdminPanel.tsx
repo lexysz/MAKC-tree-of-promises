@@ -116,7 +116,7 @@ function findAny(data: TreeData, id: string): AnyDef | null {
  * Хук для управления toast-уведомлениями с автоматическим скрытием.
  */
 function useToast() {
-  const [toast, setToast] = useState<string | null>(null);
+  const [toast, setToast] = <string | null>(null);
   const timerRef = useRef<number | null>(null);
 
   const notify = (msg: string) => {
@@ -132,7 +132,7 @@ function useToast() {
  * Хук для двухэтапного подтверждения деструктивных действий.
  */
 function useConfirmation(timeoutMs: number = CONFIRM_TIMEOUT_MS) {
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = (false);
   const timerRef = useRef<number | null>(null);
 
   const request = (onConfirm: () => void) => {
@@ -435,10 +435,10 @@ interface NodeEditorProps {
 }
 
 function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
-  const [title, setTitle] = useState(node.title);
+  const [title, setTitle] = useState(node.title ?? "");
   const [short, setShort] = useState(node.short ?? "");
-  const [description, setDescription] = useState(node.description);
-  const [who, setWho] = useState(node.who ?? "");
+  const [description, setDescription] = useState(node.description ?? "");
+  const [who, setWho] = (node.who ?? "");
   const [toWhom, setToWhom] = useState(node.toWhom ?? "");
   const [metrics, setMetrics] = useState(node.metrics ?? "");
   const [logo, setLogo] = useState<string | undefined>(node.logo);
@@ -473,10 +473,10 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
     }
   };
 
-  const dirty =
-    title.trim() !== node.title ||
+   const dirty =
+    title.trim() !== (node.title ?? "") ||
     (hasShort && short.trim() !== (node.short ?? "")) ||
-    description.trim() !== node.description ||
+    description.trim() !== (node.description ?? "") ||
     who.trim() !== (node.who ?? "") ||
     toWhom.trim() !== (node.toWhom ?? "") ||
     metrics.trim() !== (node.metrics ?? "") ||
