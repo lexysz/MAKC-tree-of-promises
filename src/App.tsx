@@ -17,6 +17,7 @@ const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
 const ZOOM_BTN_FACTOR = 1.4;
 const SEARCH_BLUR_DELAY_MS = 150;
 const MAX_SEARCH_RESULTS = 15;
+const FIT_RECALC_DELAY_MS = 50;
 
 const DUST_PARTICLES = [
   { left: "12%", top: "22%", size: 5, color: "rgba(67,214,181,0.35)", dur: "17s" },
@@ -365,9 +366,16 @@ interface HeaderProps {
   isFilterActive: boolean;
 }
 
-function Header({ companyTitle, companyLogo, counts, search, onAdminClick, onNavigate, onDepartmentFilterClick, isFilterActive }: HeaderProps) {
-
-function Header({ companyTitle, companyLogo, counts, search, onAdminClick, onNavigate, onDepartmentFilterClick }: HeaderProps) {
+function Header({
+  companyTitle,
+  companyLogo,
+  counts,
+  search,
+  onAdminClick,
+  onNavigate,
+  onDepartmentFilterClick,
+  isFilterActive,
+}: HeaderProps) {
   return (
     <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-4 p-4 md:p-5">
       <div className="hint-in pointer-events-auto flex items-center gap-3.5 rounded-xl border border-ink-700/50 bg-ink-900/80 py-2.5 pr-5 pl-3 backdrop-blur-md">
@@ -405,7 +413,7 @@ function Header({ companyTitle, companyLogo, counts, search, onAdminClick, onNav
           onSelect={onNavigate}
         />
 
-          <button
+        <button
           onClick={onDepartmentFilterClick}
           title={isFilterActive ? "Фильтр активен — нажмите, чтобы открыть панель" : "Фильтр по подразделению"}
           className={`hint-in group pointer-events-auto flex h-[46px] items-center gap-2.5 rounded-xl border px-4 text-[12px] font-semibold backdrop-blur-md transition-all duration-200 hover:-translate-y-0.5 ${
@@ -577,7 +585,7 @@ export default function App() {
 
   // ─── Фильтрация по подразделению ───────────────────────────────
 
- // Извлекаем уникальные подразделения из поля «Кто даёт»
+  // Извлекаем уникальные подразделения из поля «Кто даёт»
   const departments: DepartmentInfo[] = useMemo(() => {
     const deptMap = new Map<string, number>();
 
@@ -592,8 +600,7 @@ export default function App() {
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [graph.nodes]);
 
-  
-   // Находим узлы, где выбранное подразделение фигурирует в поле «Кто даёт»
+  // Находим узлы, где выбранное подразделение фигурирует в поле «Кто даёт»
   const filterHighlightIds = useMemo(() => {
     if (!departmentFilter) return null;
 
@@ -614,12 +621,11 @@ export default function App() {
     const result: FilteredNode[] = [];
     const valueTitles = new Map<string, string>();
 
-    // Собираем названия ценностей для контекста
     for (const value of data.values) {
       valueTitles.set(value.id, value.title);
     }
 
-  for (const node of graph.nodes) {
+    for (const node of graph.nodes) {
       if (node.tier !== "root" && node.tier !== "support") continue;
       if (node.who === departmentFilter) {
         result.push({
@@ -637,6 +643,15 @@ export default function App() {
 
     return result.sort((a, b) => a.title.localeCompare(b.title, "ru"));
   }, [departmentFilter, graph.nodes, data.values]);
+
+  // Пересчитываем положение камеры при открытии/закрытии панели фильтра,
+  // чтобы дерево центрировалось в оставшемся пространстве
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      canvasRef.current?.fit(true);
+    }, FIT_RECALC_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [showDepartmentPanel]);
 
   // ─── Рендеринг ─────────────────────────────────────────────────
 
@@ -692,6 +707,7 @@ export default function App() {
           onNodeDrag={updateNodePosition}
           companyLogo={data.company.logo}
           filterHighlightIds={filterHighlightIds}
+          isFilterPanelOpen={showDepartmentPanel}
         />
       </div>
 
@@ -733,7 +749,6 @@ export default function App() {
           onSelectDepartment={setDepartmentFilter}
           onNavigateToNode={(id) => {
             navigate(id);
-            setShowDepartmentPanel(false);
           }}
           onClose={() => setShowDepartmentPanel(false)}
         />
