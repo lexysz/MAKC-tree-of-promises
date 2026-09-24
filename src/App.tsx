@@ -69,8 +69,8 @@ function useSearch(nodes: any[]) {
     return nodes
       .filter((n) => {
         if (n.tier === "company") return false;
-        const inTitle = n.title.toLowerCase().includes(q);
-        const inDesc = n.description.toLowerCase().includes(q);
+        const inTitle = (n.title ?? "").toLowerCase().includes(q);
+        const inDesc = (n.description ?? "").toLowerCase().includes(q);
         const inWho = n.who?.toLowerCase().includes(q) ?? false;
         return inTitle || inDesc || inWho;
       })
@@ -549,6 +549,9 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string | null>(null);
   const [showDepartmentPanel, setShowDepartmentPanel] = useState(false);
+  // Запоминаем, была ли открыта панель фильтра до открытия карточки узла,
+  // чтобы восстановить её после закрытия карточки
+  const [panelStateBeforeCard, setPanelStateBeforeCard] = useState<boolean | null>(null);
   const canvasRef = useRef<TreeCanvasHandle>(null);
 
   const graph = useMemo(() => buildGraph(data.company, data.values, data.customPositions), [data]);
@@ -572,14 +575,29 @@ export default function App() {
   }, [byId, selectedId]);
 
   const navigate = (id: string | null) => {
-    setSelectedId(id);
-    if (id) {
-      const branchIds = collectFamily(id, byId);
-      canvasRef.current?.focusBranch(Array.from(branchIds));
+    if (!id) {
+      setSelectedId(null);
+      return;
     }
+    // Если карточка узла открывается при открытой панели фильтра —
+    // временно скрываем панель, чтобы дерево не было закрыто целиком
+    if (showDepartmentPanel && panelStateBeforeCard === null) {
+      setPanelStateBeforeCard(true);
+      setShowDepartmentPanel(false);
+    }
+    setSelectedId(id);
+    const branchIds = collectFamily(id, byId);
+    canvasRef.current?.focusBranch(Array.from(branchIds));
   };
 
-  const clearSelection = () => setSelectedId(null);
+  const clearSelection = () => {
+    setSelectedId(null);
+    // Возвращаемся к фильтрации: восстанавливаем панель, если она была открыта до карточки
+    if (panelStateBeforeCard) {
+      setShowDepartmentPanel(true);
+      setPanelStateBeforeCard(null);
+    }
+  };
 
   useKeyboardShortcuts(view, canvasRef, clearSelection);
 
@@ -723,7 +741,12 @@ export default function App() {
         search={search}
         onAdminClick={() => setView("admin")}
         onNavigate={navigate}
-        onDepartmentFilterClick={() => setShowDepartmentPanel((prev) => !prev)}
+        onDepartmentFilterClick={() => {
+          const next = !showDepartmentPanel;
+          setShowDepartmentPanel(next);
+          // Панель открыта вручную — автовозврат после карточки не нужен
+          if (next) setPanelStateBeforeCard(null);
+        }}
         isFilterActive={departmentFilter !== null}
       />
 
