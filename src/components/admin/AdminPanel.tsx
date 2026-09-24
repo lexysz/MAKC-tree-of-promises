@@ -116,7 +116,7 @@ function findAny(data: TreeData, id: string): AnyDef | null {
  * Хук для управления toast-уведомлениями с автоматическим скрытием.
  */
 function useToast() {
-  const [toast, setToast] = <string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
   const timerRef = useRef<number | null>(null);
 
   const notify = (msg: string) => {
