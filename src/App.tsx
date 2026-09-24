@@ -567,19 +567,14 @@ export default function App() {
 
   // ─── Фильтрация по подразделению ───────────────────────────────
 
-  // Извлекаем уникальные подразделения из всех обещаний
+ // Извлекаем уникальные подразделения из поля «Кто даёт»
   const departments: DepartmentInfo[] = useMemo(() => {
     const deptMap = new Map<string, number>();
 
     for (const node of graph.nodes) {
       if (node.tier !== "root" && node.tier !== "support") continue;
-
-      if (node.who) {
-        deptMap.set(node.who, (deptMap.get(node.who) || 0) + 1);
-      }
-      if (node.toWhom) {
-        deptMap.set(node.toWhom, (deptMap.get(node.toWhom) || 0) + 1);
-      }
+      if (!node.who) continue;
+      deptMap.set(node.who, (deptMap.get(node.who) || 0) + 1);
     }
 
     return Array.from(deptMap.entries())
@@ -587,14 +582,15 @@ export default function App() {
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [graph.nodes]);
 
-  // Находим узлы, релевантные выбранному подразделению
+  
+   // Находим узлы, где выбранное подразделение фигурирует в поле «Кто даёт»
   const filterHighlightIds = useMemo(() => {
     if (!departmentFilter) return null;
 
     const ids = new Set<string>();
     for (const node of graph.nodes) {
       if (node.tier !== "root" && node.tier !== "support") continue;
-      if (node.who === departmentFilter || node.toWhom === departmentFilter) {
+      if (node.who === departmentFilter) {
         ids.add(node.id);
       }
     }
@@ -613,9 +609,9 @@ export default function App() {
       valueTitles.set(value.id, value.title);
     }
 
-    for (const node of graph.nodes) {
+  for (const node of graph.nodes) {
       if (node.tier !== "root" && node.tier !== "support") continue;
-      if (node.who === departmentFilter || node.toWhom === departmentFilter) {
+      if (node.who === departmentFilter) {
         result.push({
           id: node.id,
           title: node.title,
