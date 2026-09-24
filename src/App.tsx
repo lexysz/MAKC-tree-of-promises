@@ -17,7 +17,7 @@ const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
 const ZOOM_BTN_FACTOR = 1.4;
 const SEARCH_BLUR_DELAY_MS = 150;
 const MAX_SEARCH_RESULTS = 15;
-const FIT_RECALC_DELAY_MS = 50;
+const FIT_RECALC_DELAY_MS = 350;
 
 const DUST_PARTICLES = [
   { left: "12%", top: "22%", size: 5, color: "rgba(67,214,181,0.35)", dur: "17s" },
