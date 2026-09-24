@@ -80,6 +80,8 @@ interface Props {
   companyLogo?: string;
   /** Множество узлов для подсветки при фильтрации по подразделению */
   filterHighlightIds?: Set<string> | null;
+  /** Флаг открытия панели фильтра (для центровки дерева в правой части) */
+  isFilterPanelOpen?: boolean;
 }
 
 // ─── Utilities ───────────────────────────────────────────────────
@@ -707,7 +709,19 @@ function Tooltip({ node, view }: { node: GraphNode; view: ViewState }) {
 // ─── Main Component ──────────────────────────────────────────────
 
 const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props, ref) {
-  const { nodes, edges, bounds, selectedId, familySet, onSelect, isAdmin, onNodeDrag, companyLogo, filterHighlightIds } = props;
+  const {
+    nodes,
+    edges,
+    bounds,
+    selectedId,
+    familySet,
+    onSelect,
+    isAdmin,
+    onNodeDrag,
+    companyLogo,
+    filterHighlightIds,
+    isFilterPanelOpen,
+  } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const nodeById = useRef(new Map<string, GraphNode>());
 
@@ -854,7 +868,9 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
   return (
     <div
       ref={containerRef}
-      className={`relative h-full w-full overflow-hidden touch-none select-none ${pointerInteraction.isPanning ? "cursor-grabbing" : "cursor-grab"}`}
+      className={`relative h-full w-full overflow-hidden touch-none select-none transition-[padding] duration-300 ${
+        isFilterPanelOpen ? "md:pr-[50%]" : ""
+      } ${pointerInteraction.isPanning ? "cursor-grabbing" : "cursor-grab"}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
@@ -906,10 +922,8 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
           })}
 
           {uniqueNodes.map((node) => {
-            const isFilteredOut = isFilterActive && !filterHighlightIds!.has(node.id);
-            const shouldDim = selectedId && familySet
-              ? !familySet.has(node.id)
-              : isFilteredOut;
+            const isFilteredOut = isFilterActive && filterHighlightIds ? !filterHighlightIds.has(node.id) : false;
+            const shouldDim = selectedId && familySet ? !familySet.has(node.id) : isFilteredOut;
 
             return (
               <NodeGlyph
