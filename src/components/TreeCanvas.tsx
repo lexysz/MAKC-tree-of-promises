@@ -91,8 +91,39 @@ function easeInOutCubic(t: number): number {
 }
 
 /**
+ * Корректирует путь рёбра с учётом смещения перетаскиваемого узла.
+ * Парсит строку "M x1 y1 L x2 y2" и смещает соответствующие координаты.
+ */
+function getAdjustedEdgePath(edge: GraphEdge, dragOffset: DragOffset | null): string {
+  if (!dragOffset) return edge.d;
+
+  const isFromDragged = edge.from === dragOffset.nodeId;
+  const isToDragged = edge.to === dragOffset.nodeId;
+
+  if (!isFromDragged && !isToDragged) return edge.d;
+
+  const match = edge.d.match(/M ([\d.-]+) ([\d.-]+) L ([\d.-]+) ([\d.-]+)/);
+  if (!match) return edge.d;
+
+  let x1 = parseFloat(match[1]);
+  let y1 = parseFloat(match[2]);
+  let x2 = parseFloat(match[3]);
+  let y2 = parseFloat(match[4]);
+
+  if (isFromDragged) {
+    x1 += dragOffset.dx;
+    y1 += dragOffset.dy;
+  }
+  if (isToDragged) {
+    x2 += dragOffset.dx;
+    y2 += dragOffset.dy;
+  }
+
+  return `M ${x1} ${y1} L ${x2} ${y2}`;
+}
+
+/**
  * Конвертирует цвет (HEX или HSL) в нормализованные RGB значения [0-1].
- * Используется для SVG фильтров перекрашивания логотипа.
  */
 function colorToRGB(color: string): [number, number, number] {
   if (color.startsWith("#")) {
@@ -131,9 +162,6 @@ function colorToRGB(color: string): [number, number, number] {
 
 // ─── Custom Hooks ────────────────────────────────────────────────
 
-/**
- * Управляет состоянием вида камеры (позиция и зум) и анимациями.
- */
 function useCanvasView(bounds: GraphBounds, containerRef: React.RefObject<HTMLDivElement | null>) {
   const [view, setView] = useState<ViewState>({ x: 0, y: 0, k: 0.5 });
   const viewRef = useRef(view);
@@ -203,7 +231,6 @@ function useCanvasView(bounds: GraphBounds, containerRef: React.RefObject<HTMLDi
     }
   };
 
-  // Initial fit animation
   useLayoutEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -215,7 +242,6 @@ function useCanvasView(bounds: GraphBounds, containerRef: React.RefObject<HTMLDi
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // Wheel zoom handler
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -231,20 +257,9 @@ function useCanvasView(bounds: GraphBounds, containerRef: React.RefObject<HTMLDi
     return () => el.removeEventListener("wheel", handleWheel);
   }, []);
 
-  return {
-    view,
-    setView,
-    viewRef,
-    animateTo,
-    calculateFitView,
-    zoomAt,
-    stopAnimation,
-  };
+  return { view, setView, viewRef, animateTo, calculateFitView, zoomAt, stopAnimation };
 }
 
-/**
- * Управляет взаимодействием с указателем: panning и hover.
- */
 function usePointerInteraction(
   containerRef: React.RefObject<HTMLDivElement | null>,
   isAdmin: boolean | undefined
@@ -320,22 +335,9 @@ function usePointerInteraction(
     downInfo.current = null;
   };
 
-  return {
-    hoverId,
-    setHoverId,
-    isPanning,
-    handlePointerDown,
-    handlePointerMove,
-    handlePointerUp,
-    handlePointerCancel,
-  };
+  return { hoverId, setHoverId, isPanning, handlePointerDown, handlePointerMove, handlePointerUp, handlePointerCancel };
 }
 
-/**
- * Управляет перетаскиванием узлов для администраторов.
- * Использует временный offset для мгновенного визуального перемещения
- * без мутации исходных данных дерева (React не перерендеривает всё дерево).
- */
 function useDragNode(
   containerRef: React.RefObject<HTMLDivElement | null>,
   nodeById: React.MutableRefObject<Map<string, GraphNode>>,
@@ -380,8 +382,6 @@ function useDragNode(
     const deltaX = worldX - dragState.current.startWorldX;
     const deltaY = worldY - dragState.current.startWorldY;
 
-    // Обновляем offset для мгновенного визуального перемещения
-    // (без мутации данных — React перерисовывает только текущий узел)
     setDragOffset({
       nodeId: dragState.current.nodeId,
       dx: deltaX,
@@ -391,7 +391,6 @@ function useDragNode(
 
   const endDrag = () => {
     if (dragState.current && dragOffset && onNodeDrag) {
-      // Сохраняем финальную позицию (startX + накопленный offset)
       const finalX = dragState.current.nodeStartX + dragOffset.dx;
       const finalY = dragState.current.nodeStartY + dragOffset.dy;
       onNodeDrag(dragState.current.nodeId, finalX, finalY);
@@ -406,14 +405,28 @@ function useDragNode(
 
 // ─── Sub-Components ──────────────────────────────────────────────
 
-function EdgeRenderer({ edge, isActive, isDimmed, zoomBoost }: { edge: GraphEdge; isActive: boolean; isDimmed: boolean; zoomBoost: number }) {
+interface EdgeRendererProps {
+  edge: GraphEdge;
+  isActive: boolean;
+  isDimmed: boolean;
+  zoomBoost: number;
+  dragOffset: DragOffset | null;
+}
+
+function EdgeRenderer({ edge, isActive, isDimmed, zoomBoost, dragOffset }: EdgeRendererProps) {
   const bgStyle = EDGE_STYLES.background;
   const fgStyle = EDGE_STYLES.foreground;
+
+  // Корректируем путь рёбра, если оно связано с перетаскиваемым узлом
+  const adjustedD = useMemo(
+    () => getAdjustedEdgePath(edge, dragOffset),
+    [edge.d, dragOffset]
+  );
 
   return (
     <g className="edge-g" style={{ opacity: isDimmed ? 0.06 : 1 }}>
       <path
-        d={edge.d}
+        d={adjustedD}
         pathLength={1}
         className="edge-draw"
         style={{ animationDelay: `${edge.delay}s` }}
@@ -424,7 +437,7 @@ function EdgeRenderer({ edge, isActive, isDimmed, zoomBoost }: { edge: GraphEdge
         opacity={isActive ? bgStyle.opacity.active : bgStyle.opacity.inactive}
       />
       <path
-        d={edge.d}
+        d={adjustedD}
         pathLength={1}
         className={`edge-draw ${isActive ? "edge-flow" : ""}`}
         style={{ animationDelay: `${edge.delay}s` }}
@@ -453,7 +466,6 @@ function NodeGlyph({ node, hovered, selected, dimmed, companyLogo, dragOffset, i
   const { tier, r, color, short, delay } = node;
   const lines = tier === "root" ? short.split(" ") : [];
 
-  // Применяем offset во время drag для плавного перемещения за курсором
   const offsetDx = dragOffset?.nodeId === node.id ? dragOffset.dx : 0;
   const offsetDy = dragOffset?.nodeId === node.id ? dragOffset.dy : 0;
   const finalX = node.x + offsetDx;
@@ -644,7 +656,6 @@ function NodeGlyph({ node, hovered, selected, dimmed, companyLogo, dragOffset, i
       className="node-g cursor-pointer"
       style={{
         opacity: dimmed ? 0.16 : 1,
-        // Visual feedback при drag: тень создаёт эффект "поднятия" узла
         filter: isDragging ? "drop-shadow(0 8px 16px rgba(0, 0, 0, 0.5))" : "none",
         transition: isDragging ? "none" : "filter 0.2s ease-out",
       }}
@@ -700,7 +711,6 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
   const containerRef = useRef<HTMLDivElement>(null);
   const nodeById = useRef(new Map<string, GraphNode>());
 
-  // Deduplicate nodes
   const uniqueNodes = useMemo(() => {
     const seen = new Map<string, GraphNode>();
     nodes.forEach((n) => {
@@ -715,7 +725,6 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
 
   nodeById.current = new Map(uniqueNodes.map((n) => [n.id, n]));
 
-  // Calculate ring radii for visual guides
   const ringRadii = useMemo(() => {
     const calculateAverageRadius = (tierNodes: GraphNode[]) => {
       if (tierNodes.length === 0) return 0;
@@ -730,12 +739,10 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
     ];
   }, [uniqueNodes]);
 
-  // Initialize hooks
   const canvasView = useCanvasView(bounds, containerRef);
   const pointerInteraction = usePointerInteraction(containerRef, isAdmin);
   const dragNode = useDragNode(containerRef, nodeById, canvasView.viewRef, onNodeDrag);
 
-  // Expose imperative API
   useImperativeHandle(
     ref,
     () => ({
@@ -811,7 +818,6 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
   const zoomBoost = canvasView.view.k < LOW_ZOOM_THRESHOLD ? LOW_ZOOM_BOOST : 1;
   const hoverNode = pointerInteraction.hoverId ? nodeById.current.get(pointerInteraction.hoverId) : undefined;
 
-  // Event handlers
   const handlePointerDown = (e: React.PointerEvent) => {
     canvasView.stopAnimation();
     pointerInteraction.handlePointerDown(e, (nodeId) => dragNode.startDrag(nodeId, e.clientX, e.clientY));
@@ -878,7 +884,16 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
           {edges.map((edge) => {
             const active = isEdgeActive(edge);
             const dimmed = isDimming && !active;
-            return <EdgeRenderer key={edge.id} edge={edge} isActive={active} isDimmed={dimmed} zoomBoost={zoomBoost} />;
+            return (
+              <EdgeRenderer
+                key={edge.id}
+                edge={edge}
+                isActive={active}
+                isDimmed={dimmed}
+                zoomBoost={zoomBoost}
+                dragOffset={dragNode.dragOffset}
+              />
+            );
           })}
 
           {uniqueNodes.map((node) => (
