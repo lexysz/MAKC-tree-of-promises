@@ -888,10 +888,8 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
   const isEdgeActive = (edge: GraphEdge) => {
     // Режим выбора узла (приоритет)
     if (selectedId && familySet) return familySet.has(edge.from) && familySet.has(edge.to);
-    // Режим фильтрации по подразделению
-    if (isFilterActive && filterHighlightIds!.size > 0) {
-      return filterHighlightIds!.has(edge.from) || filterHighlightIds!.has(edge.to);
-    }
+    // Режим фильтрации: линии НЕ подсвечиваются — горят только узлы
+    if (isFilterActive) return false;
     // Режим наведения
     if (pointerInteraction.hoverId) return edge.from === pointerInteraction.hoverId || edge.to === pointerInteraction.hoverId;
     return false;
@@ -977,7 +975,15 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
 
           {edges.map((edge) => {
             const active = isEdgeActive(edge);
-            const dimmed = isDimming && !active;
+            // При фильтрации линия остаётся видимой, только если оба её узла подсвечены;
+            // в режиме выбора узла — как раньше: видимы только линии активной семьи
+            const dimmed =
+              isDimming &&
+              !active &&
+              (isFilterActive
+                ? !(filterHighlightIds!.has(edge.from) && filterHighlightIds!.has(edge.to))
+                : true);
+
             return (
               <EdgeRenderer
                 key={edge.id}
