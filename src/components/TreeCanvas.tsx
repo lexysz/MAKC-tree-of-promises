@@ -62,6 +62,12 @@ interface DownInfo {
   nodeId: string | null;
 }
 
+interface DragOffset {
+  nodeId: string;
+  dx: number;
+  dy: number;
+}
+
 interface Props {
   nodes: GraphNode[];
   edges: GraphEdge[];
@@ -241,7 +247,6 @@ function useCanvasView(bounds: GraphBounds, containerRef: React.RefObject<HTMLDi
  */
 function usePointerInteraction(
   containerRef: React.RefObject<HTMLDivElement | null>,
-  nodeById: React.MutableRefObject<Map<string, GraphNode>>,
   isAdmin: boolean | undefined
 ) {
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -328,6 +333,8 @@ function usePointerInteraction(
 
 /**
  * Управляет перетаскиванием узлов для администраторов.
+ * Использует временный offset для мгновенного визуального перемещения
+ * без мутации исходных данных дерева (React не перерендеривает всё дерево).
  */
 function useDragNode(
   containerRef: React.RefObject<HTMLDivElement | null>,
@@ -336,6 +343,7 @@ function useDragNode(
   onNodeDrag?: (id: string, x: number, y: number) => void
 ) {
   const [dragNodeId, setDragNodeId] = useState<string | null>(null);
+  const [dragOffset, setDragOffset] = useState<DragOffset | null>(null);
   const dragState = useRef<DragState | null>(null);
 
   const startDrag = (nodeId: string, clientX: number, clientY: number) => {
@@ -372,26 +380,28 @@ function useDragNode(
     const deltaX = worldX - dragState.current.startWorldX;
     const deltaY = worldY - dragState.current.startWorldY;
 
-    const node = nodeById.current.get(dragState.current.nodeId);
-    if (node) {
-      node.x = dragState.current.nodeStartX + deltaX;
-      node.y = dragState.current.nodeStartY + deltaY;
-      setDragNodeId(dragState.current.nodeId);
-    }
+    // Обновляем offset для мгновенного визуального перемещения
+    // (без мутации данных — React перерисовывает только текущий узел)
+    setDragOffset({
+      nodeId: dragState.current.nodeId,
+      dx: deltaX,
+      dy: deltaY,
+    });
   };
 
   const endDrag = () => {
-    if (dragState.current && onNodeDrag) {
-      const node = nodeById.current.get(dragState.current.nodeId);
-      if (node) {
-        onNodeDrag(dragState.current.nodeId, node.x, node.y);
-      }
+    if (dragState.current && dragOffset && onNodeDrag) {
+      // Сохраняем финальную позицию (startX + накопленный offset)
+      const finalX = dragState.current.nodeStartX + dragOffset.dx;
+      const finalY = dragState.current.nodeStartY + dragOffset.dy;
+      onNodeDrag(dragState.current.nodeId, finalX, finalY);
     }
     dragState.current = null;
     setDragNodeId(null);
+    setDragOffset(null);
   };
 
-  return { dragNodeId, startDrag, updateDrag, endDrag };
+  return { dragNodeId, dragOffset, startDrag, updateDrag, endDrag };
 }
 
 // ─── Sub-Components ──────────────────────────────────────────────
@@ -435,11 +445,19 @@ interface NodeGlyphProps {
   dimmed: boolean;
   companyLogo?: string;
   zoom: number;
+  dragOffset: DragOffset | null;
+  isDragging: boolean;
 }
 
-function NodeGlyph({ node, hovered, selected, dimmed, companyLogo, zoom }: NodeGlyphProps) {
+function NodeGlyph({ node, hovered, selected, dimmed, companyLogo, dragOffset, isDragging }: NodeGlyphProps) {
   const { tier, r, color, short, delay } = node;
   const lines = tier === "root" ? short.split(" ") : [];
+
+  // Применяем offset во время drag для плавного перемещения за курсором
+  const offsetDx = dragOffset?.nodeId === node.id ? dragOffset.dx : 0;
+  const offsetDy = dragOffset?.nodeId === node.id ? dragOffset.dy : 0;
+  const finalX = node.x + offsetDx;
+  const finalY = node.y + offsetDy;
 
   const renderCompanyTier = () => (
     <>
@@ -622,9 +640,14 @@ function NodeGlyph({ node, hovered, selected, dimmed, companyLogo, zoom }: NodeG
   return (
     <g
       data-node={node.id}
-      transform={`translate(${node.x} ${node.y})`}
+      transform={`translate(${finalX} ${finalY})`}
       className="node-g cursor-pointer"
-      style={{ opacity: dimmed ? 0.16 : 1 }}
+      style={{
+        opacity: dimmed ? 0.16 : 1,
+        // Visual feedback при drag: тень создаёт эффект "поднятия" узла
+        filter: isDragging ? "drop-shadow(0 8px 16px rgba(0, 0, 0, 0.5))" : "none",
+        transition: isDragging ? "none" : "filter 0.2s ease-out",
+      }}
     >
       <g className="node-pop" style={{ animationDelay: `${delay}s` }}>
         <circle r={r + 10} fill="rgba(0,0,0,0)" />
@@ -709,7 +732,7 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
 
   // Initialize hooks
   const canvasView = useCanvasView(bounds, containerRef);
-  const pointerInteraction = usePointerInteraction(containerRef, nodeById, isAdmin);
+  const pointerInteraction = usePointerInteraction(containerRef, isAdmin);
   const dragNode = useDragNode(containerRef, nodeById, canvasView.viewRef, onNodeDrag);
 
   // Expose imperative API
@@ -867,12 +890,16 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
               dimmed={isDimming && familySet ? !familySet.has(node.id) : false}
               companyLogo={node.tier === "company" || node.tier === "root" ? companyLogo : undefined}
               zoom={canvasView.view.k}
+              dragOffset={dragNode.dragOffset}
+              isDragging={dragNode.dragNodeId === node.id}
             />
           ))}
         </g>
       </svg>
 
-      {hoverNode && !pointerInteraction.isPanning && <Tooltip node={hoverNode} view={canvasView.view} />}
+      {hoverNode && !pointerInteraction.isPanning && !dragNode.dragNodeId && (
+        <Tooltip node={hoverNode} view={canvasView.view} />
+      )}
     </div>
   );
 });
