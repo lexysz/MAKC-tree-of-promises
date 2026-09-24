@@ -866,10 +866,10 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
   };
 
   return (
-    <div
+       <div
       ref={containerRef}
-      className={`relative h-full w-full overflow-hidden touch-none select-none transition-[padding] duration-300 ${
-        isFilterPanelOpen ? "md:pr-[50%]" : ""
+      className={`relative h-full overflow-hidden touch-none select-none transition-all duration-300 ${
+        isFilterPanelOpen ? "w-full md:w-1/2 md:ml-auto" : "w-full"
       } ${pointerInteraction.isPanning ? "cursor-grabbing" : "cursor-grab"}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
