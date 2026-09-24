@@ -4,6 +4,7 @@ import type { TreeCanvasHandle } from "./components/TreeCanvas";
 import DetailPanel from "./components/DetailPanel";
 import AdminLogin from "./components/admin/AdminLogin";
 import AdminPanel from "./components/admin/AdminPanel";
+import DepartmentFilterPanel, { type DepartmentInfo, type FilteredNode } from "./components/DepartmentFilterPanel";
 import { buildGraph, collectFamily } from "./lib/layout";
 import { useTreeData } from "./state/useTreeData";
 import { supabase } from "./lib/supabase";
@@ -152,6 +153,14 @@ function AdminIcon() {
       <rect x="3" y="7" width="10" height="7" rx="1.6" stroke="currentColor" strokeWidth="1.4" />
       <path d="M5.2 7V5.4a2.8 2.8 0 115.6 0V7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
       <circle cx="8" cy="10.5" r="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function FilterIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+      <path d="M2 4h12M4 8h8M6 12h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }
@@ -352,9 +361,10 @@ interface HeaderProps {
   search: ReturnType<typeof useSearch>;
   onAdminClick: () => void;
   onNavigate: (id: string) => void;
+  onDepartmentFilterClick: () => void;
 }
 
-function Header({ companyTitle, companyLogo, counts, search, onAdminClick, onNavigate }: HeaderProps) {
+function Header({ companyTitle, companyLogo, counts, search, onAdminClick, onNavigate, onDepartmentFilterClick }: HeaderProps) {
   return (
     <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-4 p-4 md:p-5">
       <div className="hint-in pointer-events-auto flex items-center gap-3.5 rounded-xl border border-ink-700/50 bg-ink-900/80 py-2.5 pr-5 pl-3 backdrop-blur-md">
@@ -391,6 +401,15 @@ function Header({ companyTitle, companyLogo, counts, search, onAdminClick, onNav
           onClear={search.clear}
           onSelect={onNavigate}
         />
+
+        <button
+          onClick={onDepartmentFilterClick}
+          title="Фильтр по подразделению"
+          className="hint-in group pointer-events-auto flex h-[46px] items-center gap-2.5 rounded-xl border border-lagoon/35 bg-ink-900/80 px-4 text-[12px] font-semibold text-lagoon backdrop-blur-md transition-all duration-200 hover:-translate-y-0.5 hover:border-lagoon/70 hover:bg-lagoon/10 hover:shadow-lg hover:shadow-lagoon/10"
+        >
+          <FilterIcon />
+          Подразделения
+        </button>
 
         <button
           onClick={onAdminClick}
@@ -510,6 +529,8 @@ export default function App() {
   const { session, checking, authed } = useAuth();
   const [view, setView] = useState<View>("tree");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [departmentFilter, setDepartmentFilter] = useState<string | null>(null);
+  const [showDepartmentPanel, setShowDepartmentPanel] = useState(false);
   const canvasRef = useRef<TreeCanvasHandle>(null);
 
   const graph = useMemo(() => buildGraph(data.company, data.values, data.customPositions), [data]);
@@ -544,6 +565,75 @@ export default function App() {
 
   useKeyboardShortcuts(view, canvasRef, clearSelection);
 
+  // ─── Фильтрация по подразделению ───────────────────────────────
+
+  // Извлекаем уникальные подразделения из всех обещаний
+  const departments: DepartmentInfo[] = useMemo(() => {
+    const deptMap = new Map<string, number>();
+
+    for (const node of graph.nodes) {
+      if (node.tier !== "root" && node.tier !== "support") continue;
+
+      if (node.who) {
+        deptMap.set(node.who, (deptMap.get(node.who) || 0) + 1);
+      }
+      if (node.toWhom) {
+        deptMap.set(node.toWhom, (deptMap.get(node.toWhom) || 0) + 1);
+      }
+    }
+
+    return Array.from(deptMap.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ru"));
+  }, [graph.nodes]);
+
+  // Находим узлы, релевантные выбранному подразделению
+  const filterHighlightIds = useMemo(() => {
+    if (!departmentFilter) return null;
+
+    const ids = new Set<string>();
+    for (const node of graph.nodes) {
+      if (node.tier !== "root" && node.tier !== "support") continue;
+      if (node.who === departmentFilter || node.toWhom === departmentFilter) {
+        ids.add(node.id);
+      }
+    }
+    return ids;
+  }, [departmentFilter, graph.nodes]);
+
+  // Формируем список отфильтрованных обещаний с деталями
+  const filteredNodes: FilteredNode[] = useMemo(() => {
+    if (!departmentFilter) return [];
+
+    const result: FilteredNode[] = [];
+    const valueTitles = new Map<string, string>();
+
+    // Собираем названия ценностей для контекста
+    for (const value of data.values) {
+      valueTitles.set(value.id, value.title);
+    }
+
+    for (const node of graph.nodes) {
+      if (node.tier !== "root" && node.tier !== "support") continue;
+      if (node.who === departmentFilter || node.toWhom === departmentFilter) {
+        result.push({
+          id: node.id,
+          title: node.title,
+          tier: node.tier,
+          color: node.color,
+          who: node.who,
+          toWhom: node.toWhom,
+          metrics: node.metrics,
+          valueTitle: valueTitles.get(node.familyId) || "",
+        });
+      }
+    }
+
+    return result.sort((a, b) => a.title.localeCompare(b.title, "ru"));
+  }, [departmentFilter, graph.nodes, data.values]);
+
+  // ─── Рендеринг ─────────────────────────────────────────────────
+
   if (loading || checking) {
     return (
       <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
@@ -554,29 +644,29 @@ export default function App() {
     );
   }
 
-if (view === "admin") {
-  return (
-    <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
-      <BackgroundGradient />
-      <DustParticles />
-      {authed ? (
-        <AdminPanel
-          data={data}
-          modified={modified}
-          onBack={() => setView("tree")}
-          onLogout={async () => await supabase.auth.signOut()}
-          onSave={updateNode}
-          onUpdateCompany={updateCompany}
-          onApplyImport={(r) => replaceValues(r.values)}
-          onReset={reset}
-          onResetAllPositions={resetAllPositions}
-        />
-      ) : (
-        <AdminLogin onSuccess={() => {}} onBack={() => setView("tree")} />
-      )}
-    </div>
-  );
-}
+  if (view === "admin") {
+    return (
+      <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
+        <BackgroundGradient />
+        <DustParticles />
+        {authed ? (
+          <AdminPanel
+            data={data}
+            modified={modified}
+            onBack={() => setView("tree")}
+            onLogout={async () => await supabase.auth.signOut()}
+            onSave={updateNode}
+            onUpdateCompany={updateCompany}
+            onApplyImport={(r) => replaceValues(r.values)}
+            onReset={reset}
+            onResetAllPositions={resetAllPositions}
+          />
+        ) : (
+          <AdminLogin onSuccess={() => {}} onBack={() => setView("tree")} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
@@ -595,6 +685,7 @@ if (view === "admin") {
           isAdmin={authed}
           onNodeDrag={updateNodePosition}
           companyLogo={data.company.logo}
+          filterHighlightIds={filterHighlightIds}
         />
       </div>
 
@@ -610,6 +701,7 @@ if (view === "admin") {
         search={search}
         onAdminClick={() => setView("admin")}
         onNavigate={navigate}
+        onDepartmentFilterClick={() => setShowDepartmentPanel(true)}
       />
 
       <Legend companyLogo={data.company.logo} />
@@ -624,6 +716,21 @@ if (view === "admin") {
         onClose={clearSelection}
         onNavigate={navigate}
       />
+
+      {/* Панель фильтрации по подразделению */}
+      {showDepartmentPanel && (
+        <DepartmentFilterPanel
+          departments={departments}
+          selectedDepartment={departmentFilter}
+          filteredNodes={filteredNodes}
+          onSelectDepartment={setDepartmentFilter}
+          onNavigateToNode={(id) => {
+            navigate(id);
+            setShowDepartmentPanel(false);
+          }}
+          onClose={() => setShowDepartmentPanel(false)}
+        />
+      )}
     </div>
   );
 }
