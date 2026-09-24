@@ -30,7 +30,7 @@ const NODE_STYLES = {
   root: { minFontSize: 18, maxFontSize: 33, lengthFactor: 0.55, widthFactor: 1.2 },
 } as const;
 
-// ─── Types ───────────────────────────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────────
 
 export interface TreeCanvasHandle {
   focusBranch: (ids: string[]) => void;
@@ -80,8 +80,10 @@ interface Props {
   companyLogo?: string;
   /** Множество узлов для подсветки при фильтрации по подразделению */
   filterHighlightIds?: Set<string> | null;
-  /** Флаг открытия панели фильтра (для центровки дерева в правой части) */
+  /** Флаг открытия панели фильтра (канвас сжимается до правой половины) */
   isFilterPanelOpen?: boolean;
+  /** Флаг открытой карточки узла (канвас сжимается до левой половины) */
+  isCardOpen?: boolean;
 }
 
 // ─── Utilities ───────────────────────────────────────────────────
@@ -780,6 +782,7 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
     companyLogo,
     filterHighlightIds,
     isFilterPanelOpen,
+    isCardOpen,
   } = props;
   const containerRef = useRef<HTMLDivElement>(null);
   const nodeById = useRef(new Map<string, GraphNode>());
@@ -856,22 +859,19 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
         const boxWidth = maxX - minX;
         const boxHeight = maxY - minY;
 
-        const width = el.clientWidth;
-        const height = el.clientHeight;
-        const isDesktop = width >= 1024;
-        const availableWidth = isDesktop ? width * 0.5 : width;
-        const centerX = isDesktop ? width * 0.25 : width * 0.5;
-        const centerY = height * 0.5;
-
-        const padding = isDesktop ? 80 : 60;
-        const scaleX = (availableWidth - padding * 2) / boxWidth;
-        const scaleY = (height - padding * 2) / boxHeight;
+        // Контейнер всегда равен видимой области дерева (панели и карточка
+        // сжимают его сами), поэтому центрируем ветку по центру контейнера
+        const w = el.clientWidth;
+        const h = el.clientHeight;
+        const padding = w >= 1024 ? 80 : 60;
+        const scaleX = (w - padding * 2) / boxWidth;
+        const scaleY = (h - padding * 2) / boxHeight;
         const targetZoom = clampZoom(Math.min(Math.min(scaleX, scaleY), 2.5));
 
         canvasView.animateTo(
           {
-            x: centerX - boxCenterX * targetZoom,
-            y: centerY - boxCenterY * targetZoom,
+            x: w / 2 - boxCenterX * targetZoom,
+            y: h / 2 - boxCenterY * targetZoom,
             k: targetZoom,
           },
           FOCUS_ANIMATION_DURATION
@@ -935,8 +935,8 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
   return (
     <div
       ref={containerRef}
-      className={`relative h-full overflow-hidden touch-none select-none transition-all duration-300 ${
-        isFilterPanelOpen ? "w-full md:w-1/2 md:ml-auto" : "w-full"
+      className={`relative h-full w-full overflow-hidden touch-none select-none ${
+        isCardOpen ? "md:w-1/2" : isFilterPanelOpen ? "md:w-1/2 md:ml-auto" : ""
       } ${pointerInteraction.isPanning ? "cursor-grabbing" : "cursor-grab"}`}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
