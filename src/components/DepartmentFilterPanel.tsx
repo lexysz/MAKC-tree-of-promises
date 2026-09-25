@@ -9,6 +9,8 @@ export interface FilteredNode {
   id: string;
   title: string;
   tier: string;
+  /** "node" — узел дерева, "general" — общее обещание компании */
+  kind: "node" | "general";
   color: string;
   who?: string;
   toWhom?: string;
@@ -21,7 +23,7 @@ interface Props {
   selectedDepartment: string | null;
   filteredNodes: FilteredNode[];
   onSelectDepartment: (name: string | null) => void;
-  onNavigateToNode: (id: string) => void;
+  onNavigateToNode: (target: FilteredNode) => void;
   onClose: () => void;
 }
 
@@ -82,11 +84,14 @@ function FilteredNodeCard({
   onNavigate,
 }: {
   node: FilteredNode;
-  onNavigate: (id: string) => void;
+  onNavigate: (target: FilteredNode) => void;
 }) {
+  const typeLabel =
+    node.kind === "general" ? "Общее" : node.tier === "root" ? "Корневое" : "Поддерживающее";
+
   return (
     <button
-      onClick={() => onNavigate(node.id)}
+      onClick={() => onNavigate(node)}
       className="group flex w-full flex-col gap-2 rounded-xl border border-ink-700/60 bg-ink-850/60 p-4 text-left transition-all hover:border-lagoon/50 hover:bg-ink-800/80"
     >
       {/* Заголовок */}
@@ -108,9 +113,9 @@ function FilteredNodeCard({
           }}
         >
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: node.color }} />
-          {node.tier === "root" ? "Корневое" : "Поддерживающее"}
+          {typeLabel}
         </span>
-        <span className="truncate">· {node.valueTitle}</span>
+        {node.valueTitle && <span className="truncate">· {node.valueTitle}</span>}
       </div>
 
       {/* Уточнения */}
@@ -151,7 +156,7 @@ export default function DepartmentFilterPanel({
   const totalFiltered = filteredNodes.length;
 
   return (
-       <aside className="pointer-events-auto absolute inset-x-0 bottom-0 z-30 flex max-h-[70vh] flex-col rounded-t-2xl border-t border-ink-700/60 bg-ink-900/95 shadow-2xl shadow-black/50 backdrop-blur-md md:inset-y-0 md:left-0 md:right-auto md:w-1/2 md:max-h-none md:rounded-none md:border-l-0 md:border-r">
+    <aside className="pointer-events-auto absolute inset-x-0 bottom-0 z-30 flex max-h-[70vh] flex-col rounded-t-2xl border-t border-ink-700/60 bg-ink-900/95 shadow-2xl shadow-black/50 backdrop-blur-md md:inset-y-0 md:left-0 md:right-auto md:w-1/2 md:max-h-none md:rounded-none md:border-l-0 md:border-r">
       {/* Цветная полоска сверху */}
       <div className="h-1 w-full shrink-0 bg-gradient-to-r from-lagoon via-lagoon/50 to-transparent" />
 
@@ -185,7 +190,7 @@ export default function DepartmentFilterPanel({
           </div>
           {departments.length === 0 ? (
             <p className="rounded-xl border border-ink-700/60 bg-ink-850/40 p-4 text-center text-[12.5px] text-mist-500">
-              Подразделения не найдены. Убедитесь, что в данных есть поля «Кто» и «Кому».
+              Подразделения не найдены. Убедитесь, что в данных есть поля «Кто».
             </p>
           ) : (
             <div className="flex flex-wrap gap-2">
