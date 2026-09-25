@@ -6,6 +6,7 @@ import AdminLogin from "./components/admin/AdminLogin";
 import AdminPanel from "./components/admin/AdminPanel";
 import DepartmentFilterPanel, { type DepartmentInfo, type FilteredNode } from "./components/DepartmentFilterPanel";
 import { buildGraph, collectFamily } from "./lib/layout";
+import { parseDepartments, matchesDepartment } from "./lib/departments";
 import { useTreeData } from "./state/useTreeData";
 import { supabase } from "./lib/supabase";
 import type { Session } from "@supabase/supabase-js";
@@ -17,6 +18,7 @@ const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
 const ZOOM_BTN_FACTOR = 1.4;
 const SEARCH_BLUR_DELAY_MS = 150;
 const MAX_SEARCH_RESULTS = 15;
+const CORE_COLOR = "#8fb6c0";
 
 const DUST_PARTICLES = [
   { left: "12%", top: "22%", size: 5, color: "rgba(67,214,181,0.35)", dur: "17s" },
@@ -32,9 +34,6 @@ type View = "tree" | "admin";
 
 // ─── Custom Hooks ────────────────────────────────────────────────
 
-/**
- * Управляет сессией Supabase: проверяет текущую сессию и подписывается на изменения.
- */
 function useAuth() {
   const [session, setSession] = useState<Session | null>(null);
   const [checking, setChecking] = useState(true);
@@ -55,9 +54,6 @@ function useAuth() {
   return { session, checking, authed: session !== null };
 }
 
-/**
- * Управляет поиском по узлам дерева.
- */
 function useSearch(nodes: any[]) {
   const [query, setQuery] = useState("");
   const [showResults, setShowResults] = useState(false);
@@ -84,9 +80,6 @@ function useSearch(nodes: any[]) {
   return { query, setQuery, showResults, setShowResults, results, clear };
 }
 
-/**
- * Обрабатывает горячие клавиши для управления деревом.
- */
 function useKeyboardShortcuts(view: View, canvasRef: React.RefObject<TreeCanvasHandle | null>, onEscape: () => void) {
   useEffect(() => {
     if (view !== "tree") return;
@@ -114,7 +107,7 @@ function useKeyboardShortcuts(view: View, canvasRef: React.RefObject<TreeCanvasH
   }, [view, canvasRef, onEscape]);
 }
 
-// ─── Icons ───────────────────────────────────────────────────────
+// ─── Icons ──────────────────────────────────────────────────────
 
 function LogoIcon() {
   return (
@@ -357,7 +350,7 @@ function SearchBar({ query, setQuery, showResults, setShowResults, results, onCl
 interface HeaderProps {
   companyTitle: string;
   companyLogo?: string;
-  counts: { value: number; root: number; support: number };
+  counts: { value: number; root: number; support: number; general: number };
   search: ReturnType<typeof useSearch>;
   onAdminClick: () => void;
   onNavigate: (id: string) => void;
@@ -400,6 +393,8 @@ function Header({
           <Stat n={counts.root} label="корневых" color="#43d6b5" />
           <span className="mx-1 h-6 w-px bg-ink-700/70" />
           <Stat n={counts.support} label="поддерживающих" color="#6fb4f2" />
+          <span className="mx-1 h-6 w-px bg-ink-700/70" />
+          <Stat n={counts.general} label="общих" color="#8fb6c0" />
         </div>
 
         <SearchBar
@@ -546,9 +541,10 @@ export default function App() {
   const { session, checking, authed } = useAuth();
   const [view, setView] = useState<View>("tree");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedGeneralId, setSelectedGeneralId] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string | null>(null);
   const [showDepartmentPanel, setShowDepartmentPanel] = useState(false);
-  // Запоминаем, была ли открыта панель фильтра до открытия карточки узла,
+  // Запоминаем, была ли открыта панель фильтра до открытия карточки,
   // чтобы восстановить её после закрытия карточки
   const [panelStateBeforeCard, setPanelStateBeforeCard] = useState<boolean | null>(null);
   const canvasRef = useRef<TreeCanvasHandle>(null);
@@ -559,38 +555,62 @@ export default function App() {
   const byId = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
   const search = useSearch(graph.nodes);
 
+  const generalPromises = data.generalPromises ?? [];
+
   const selectedNode = selectedId ? byId.get(selectedId) ?? null : null;
+  const selectedGeneral = useMemo(
+    () => generalPromises.find((p) => p.id === selectedGeneralId) ?? null,
+    [generalPromises, selectedGeneralId],
+  );
+
   const familySet = useMemo(
     () => (selectedId ? collectFamily(selectedId, byId) : null),
-    [selectedId, byId]
+    [selectedId, byId],
   );
 
   const counts = useMemo(() => {
-    const c = { value: 0, root: 0, support: 0 };
+    const c = { value: 0, root: 0, support: 0, general: generalPromises.length };
     for (const n of graph.nodes) if (n.tier in c) c[n.tier as keyof typeof c] += 1;
     return c;
-  }, [graph]);
+  }, [graph, generalPromises]);
 
   useEffect(() => {
     if (selectedId && !byId.has(selectedId)) setSelectedId(null);
   }, [byId, selectedId]);
+
+  useEffect(() => {
+    if (selectedGeneralId && !generalPromises.some((p) => p.id === selectedGeneralId)) {
+      setSelectedGeneralId(null);
+    }
+  }, [generalPromises, selectedGeneralId]);
+
+  /** Скрывает панель фильтра при открытии карточки, запоминая её состояние */
+  const hidePanelForCard = () => {
+    if (showDepartmentPanel && panelStateBeforeCard === null) {
+      setPanelStateBeforeCard(true);
+      setShowDepartmentPanel(false);
+    }
+  };
 
   const navigate = (id: string | null) => {
     if (!id) {
       setSelectedId(null);
       return;
     }
-    // Если карточка узла открывается при открытой панели фильтра —
-    // временно скрываем панель, чтобы дерево не было закрыто целиком
-    if (showDepartmentPanel && panelStateBeforeCard === null) {
-      setPanelStateBeforeCard(true);
-      setShowDepartmentPanel(false);
-    }
+    hidePanelForCard();
+    setSelectedGeneralId(null);
     setSelectedId(id);
+  };
+
+  const navigateGeneral = (id: string) => {
+    hidePanelForCard();
+    setSelectedId(null);
+    setSelectedGeneralId(id);
   };
 
   const clearSelection = () => {
     setSelectedId(null);
+    setSelectedGeneralId(null);
     // Возвращаемся к фильтрации: восстанавливаем панель, если она была открыта до карточки
     if (panelStateBeforeCard) {
       setShowDepartmentPanel(true);
@@ -602,7 +622,6 @@ export default function App() {
 
   // Единая точка управления камерой: срабатывает ПОСЛЕ коммита DOM,
   // когда контейнер канваса уже получил финальную ширину.
-  // Выбор узла → фокус на ветке; снятие выбора или смена панели → общий вид.
   useEffect(() => {
     if (firstCameraRun.current) {
       firstCameraRun.current = false;
@@ -619,40 +638,47 @@ export default function App() {
     });
 
     return () => cancelAnimationFrame(raf);
-  }, [selectedId, showDepartmentPanel, byId]);
+  }, [selectedId, selectedGeneralId, showDepartmentPanel, byId]);
 
-  // ─── Фильтрация по подразделению ───────────────────────────────
+  // ─── Фильтрация по подразделениям ──────────────────────────────
 
-  // Извлекаем уникальные подразделения из поля «Кто даёт»
+  // Извлекаем уникальные подразделения из поля «Кто даёт» (узлы + общие обещания)
   const departments: DepartmentInfo[] = useMemo(() => {
     const deptMap = new Map<string, number>();
 
     for (const node of graph.nodes) {
       if (node.tier !== "root" && node.tier !== "support") continue;
-      if (!node.who) continue;
-      deptMap.set(node.who, (deptMap.get(node.who) || 0) + 1);
+      for (const dept of parseDepartments(node.who)) {
+        deptMap.set(dept, (deptMap.get(dept) || 0) + 1);
+      }
+    }
+
+    for (const gp of generalPromises) {
+      for (const dept of parseDepartments(gp.who)) {
+        deptMap.set(dept, (deptMap.get(dept) || 0) + 1);
+      }
     }
 
     return Array.from(deptMap.entries())
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
-  }, [graph.nodes]);
+  }, [graph.nodes, generalPromises]);
 
-  // Находим узлы, где выбранное подразделение фигурирует в поле «Кто даёт»
+  // Находим узлы дерева, где выбранное подразделение фигурирует в поле «Кто даёт»
   const filterHighlightIds = useMemo(() => {
     if (!departmentFilter) return null;
 
     const ids = new Set<string>();
     for (const node of graph.nodes) {
       if (node.tier !== "root" && node.tier !== "support") continue;
-      if (node.who === departmentFilter) {
+      if (matchesDepartment(node.who, departmentFilter)) {
         ids.add(node.id);
       }
     }
     return ids;
   }, [departmentFilter, graph.nodes]);
 
-  // Формируем список отфильтрованных обещаний с деталями
+  // Формируем список отфильтрованных обещаний (узлы + общие) с деталями
   const filteredNodes: FilteredNode[] = useMemo(() => {
     if (!departmentFilter) return [];
 
@@ -665,11 +691,12 @@ export default function App() {
 
     for (const node of graph.nodes) {
       if (node.tier !== "root" && node.tier !== "support") continue;
-      if (node.who === departmentFilter) {
+      if (matchesDepartment(node.who, departmentFilter)) {
         result.push({
           id: node.id,
           title: node.title,
           tier: node.tier,
+          kind: "node",
           color: node.color,
           who: node.who,
           toWhom: node.toWhom,
@@ -679,8 +706,24 @@ export default function App() {
       }
     }
 
+    for (const gp of generalPromises) {
+      if (matchesDepartment(gp.who, departmentFilter)) {
+        result.push({
+          id: gp.id,
+          title: gp.title,
+          tier: "general",
+          kind: "general",
+          color: CORE_COLOR,
+          who: gp.who,
+          toWhom: gp.toWhom,
+          metrics: gp.metrics,
+          valueTitle: "",
+        });
+      }
+    }
+
     return result.sort((a, b) => a.title.localeCompare(b.title, "ru"));
-  }, [departmentFilter, graph.nodes, data.values]);
+  }, [departmentFilter, graph.nodes, generalPromises, data.values]);
 
   // ─── Рендеринг ─────────────────────────────────────────────────
 
@@ -707,7 +750,7 @@ export default function App() {
             onLogout={async () => await supabase.auth.signOut()}
             onSave={updateNode}
             onUpdateCompany={updateCompany}
-            onApplyImport={(r) => replaceValues(r.values)}
+            onApplyImport={(r) => replaceValues(r.values, r.generalPromises)}
             onReset={reset}
             onResetAllPositions={resetAllPositions}
           />
@@ -737,7 +780,7 @@ export default function App() {
           companyLogo={data.company.logo}
           filterHighlightIds={filterHighlightIds}
           isFilterPanelOpen={showDepartmentPanel}
-          isCardOpen={selectedId !== null}
+          isCardOpen={selectedId !== null || selectedGeneralId !== null}
         />
       </div>
 
@@ -771,8 +814,12 @@ export default function App() {
         parent={selectedNode?.parentId ? byId.get(selectedNode.parentId) ?? null : null}
         children={selectedNode ? selectedNode.childrenIds.map((id) => byId.get(id)!).filter(Boolean) : []}
         valueNode={selectedNode ? byId.get(selectedNode.familyId) ?? null : null}
+        generalPromises={generalPromises}
+        generalPromise={selectedGeneral}
         onClose={clearSelection}
         onNavigate={navigate}
+        onNavigateGeneral={navigateGeneral}
+        onBackToCompany={() => navigate(data.company.id)}
       />
 
       {/* Панель фильтрации по подразделению */}
@@ -782,8 +829,9 @@ export default function App() {
           selectedDepartment={departmentFilter}
           filteredNodes={filteredNodes}
           onSelectDepartment={setDepartmentFilter}
-          onNavigateToNode={(id) => {
-            navigate(id);
+          onNavigateToNode={(target) => {
+            if (target.kind === "general") navigateGeneral(target.id);
+            else navigate(target.id);
           }}
           onClose={() => setShowDepartmentPanel(false)}
         />
