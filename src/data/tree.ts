@@ -35,9 +35,24 @@ export interface ValueDef {
   promises: RootDef[];
 }
 
+/**
+ * Общее (клиентократическое) обещание компании.
+ * Не является узлом дерева: отображается списком в карточке компании
+ * и участвует в фильтрации по подразделениям.
+ */
+export interface GeneralPromiseDef {
+  id: string;
+  title: string;
+  description: string;
+  who: string;
+  toWhom?: string;
+  metrics?: string;
+}
+
 export interface TreeData {
   company: CompanyDef;
   values: ValueDef[];
+  generalPromises?: GeneralPromiseDef[];
   customPositions?: Record<string, { x: number; y: number }>;
 }
 
@@ -54,7 +69,6 @@ const GOLDEN_ANGLE = 137.508;
 
 /**
  * Генерирует уникальный цвет для ценности на основе золотого угла.
- * Золотой угол (≈137.508°) обеспечивает максимальное визуальное различие цветов.
  */
 export function getValueColor(index: number): string {
   const hue = (index * GOLDEN_ANGLE) % 360;
@@ -73,5 +87,6 @@ export function createEmptyTree(): TreeData {
       description: "",
     },
     values: [],
+    generalPromises: [],
   };
 }
