@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { createEmptyTree, getValueColor } from "../data/tree";
-import type { CompanyDef, TreeData, ValueDef } from "../data/tree";
+import type { CompanyDef, TreeData, ValueDef, GeneralPromiseDef } from "../data/tree";
 import { supabase } from "../lib/supabase";
 
-const STORAGE_KEY = "promise-tree-data-v7";
+const STORAGE_KEY = "promise-tree-data-v8";
 const SAVE_DEBOUNCE_MS = 500;
 
 export interface NodePatch {
@@ -15,16 +15,11 @@ export interface NodePatch {
   metrics?: string;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────
 
 /** Поля, в которых пустая строка означает «значения нет» и хранится как undefined */
 const OPTIONAL_TEXT_FIELDS = new Set(["who", "toWhom", "metrics"]);
 
-/**
- * Применяет поля из patch к целевому объекту, игнорируя undefined.
- * Пустая строка превращается в undefined ТОЛЬКО для опциональных полей —
- * обязательные (title, short, description) всегда остаются строками.
- */
 function applyPatch<T extends object>(target: T, patch: Partial<T>): void {
   (Object.keys(patch) as Array<keyof T>).forEach((key) => {
     const value = patch[key];
@@ -42,8 +37,7 @@ function cloneTree(data: TreeData): TreeData {
 /**
  * Полная нормализация дерева: гарантирует, что все обязательные поля — строки,
  * а все коллекции — массивы. Защищает от данных, испорченных старыми версиями
- * приложения или некорректным импортом (иначе for...of упадёт с
- * «false is not iterable» / «undefined is not iterable»).
+ * приложения или некорректным импортом.
  */
 function sanitizeTree(data: TreeData): TreeData {
   const str = (value: unknown, fallback = ""): string =>
@@ -54,6 +48,7 @@ function sanitizeTree(data: TreeData): TreeData {
     data.company = createEmptyTree().company;
   }
   if (!Array.isArray(data.values)) data.values = [];
+  if (!Array.isArray(data.generalPromises)) data.generalPromises = [];
 
   data.company.title = str(data.company.title);
   data.company.short = str(data.company.short);
@@ -80,6 +75,15 @@ function sanitizeTree(data: TreeData): TreeData {
         support.description = str(support.description, support.title);
       }
     }
+  }
+
+  data.generalPromises = data.generalPromises.filter((p) => p && typeof p === "object");
+  for (const gp of data.generalPromises) {
+    gp.title = str(gp.title);
+    gp.description = str(gp.description, gp.title);
+    gp.who = str(gp.who);
+    gp.toWhom = typeof gp.toWhom === "string" ? gp.toWhom : undefined;
+    gp.metrics = typeof gp.metrics === "string" ? gp.metrics : undefined;
   }
 
   return data;
@@ -166,7 +170,7 @@ async function saveToSupabase(data: TreeData): Promise<void> {
   }
 }
 
-// ─── Hook ───────────────────────────────────────────────────────
+// ─── Hook ────────────────────────────────────────────────────────
 
 export function useTreeData() {
   const [data, setData] = useState<TreeData>(
@@ -223,15 +227,19 @@ export function useTreeData() {
     });
   }, []);
 
-  const replaceValues = useCallback((values: ValueDef[]) => {
-    setData((prev) => ({
-      ...prev,
-      values: (Array.isArray(values) ? values : []).map((v, i) => ({
-        ...v,
-        color: getValueColor(i),
-      })),
-    }));
-  }, []);
+  const replaceValues = useCallback(
+    (values: ValueDef[], generalPromises: GeneralPromiseDef[] = []) => {
+      setData((prev) => ({
+        ...prev,
+        values: (Array.isArray(values) ? values : []).map((v, i) => ({
+          ...v,
+          color: getValueColor(i),
+        })),
+        generalPromises: Array.isArray(generalPromises) ? generalPromises : [],
+      }));
+    },
+    [],
+  );
 
   const updateNodePosition = useCallback((id: string, x: number, y: number) => {
     setData((prev) => {
