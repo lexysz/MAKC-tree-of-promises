@@ -1,14 +1,11 @@
 import type { GraphNode } from "../lib/layout";
+import type { GeneralPromiseDef } from "../data/tree";
 import { TIER_LABEL } from "../data/tree";
+import { parseDepartments } from "../lib/departments";
 
 // ─── Constants ───────────────────────────────────────────────────
 
-const TIER_DISPLAY_LABELS: Record<string, string> = {
-  value: "ценность",
-  root: "корневое обещание",
-  support: "поддерживающее",
-  company: "ядро",
-};
+const CORE_COLOR = "#8fb6c0";
 
 const CHILDREN_LABELS: Record<string, string> = {
   company: "Ценности",
@@ -23,11 +20,15 @@ interface Props {
   parent: GraphNode | null;
   children: GraphNode[];
   valueNode: GraphNode | null;
+  generalPromises: GeneralPromiseDef[];
+  generalPromise: GeneralPromiseDef | null;
   onClose: () => void;
   onNavigate: (id: string) => void;
+  onNavigateGeneral: (id: string) => void;
+  onBackToCompany: () => void;
 }
 
-// ─── Icons ───────────────────────────────────────────────────────
+// ─── Icons ──────────────────────────────────────────────────────
 
 function CloseIcon() {
   return (
@@ -58,10 +59,7 @@ function ArrowRightIcon() {
 function MetaRow({ label, value, color }: { label: string; value: string; color: string }) {
   return (
     <div className="flex items-start gap-3">
-      <span
-        className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full"
-        style={{ background: color, boxShadow: `0 0 6px ${color}77` }}
-      />
+      <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}77` }} />
       <div className="min-w-0">
         <dt className="text-[9.5px] font-bold uppercase tracking-[0.16em] text-mist-500">{label}</dt>
         <dd className="mt-0.5 text-[13px] leading-snug font-medium text-mist-100">{value}</dd>
@@ -116,6 +114,64 @@ function NodeContent({ node }: { node: GraphNode }) {
         </dl>
       )}
     </>
+  );
+}
+
+/**
+ * Секция карточки компании: витрина общих (клиентократических) обещаний.
+ */
+function GeneralPromisesSection({
+  items,
+  onNavigateGeneral,
+}: {
+  items: GeneralPromiseDef[];
+  onNavigateGeneral: (id: string) => void;
+}) {
+  return (
+    <div className="mt-6 border-t border-ink-700/60 pt-5">
+      <div className="flex items-baseline justify-between">
+        <span className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-mist-500">
+          Общие обещания
+        </span>
+        <span className="text-[11px] text-mist-500">{items.length}</span>
+      </div>
+
+      {items.length === 0 ? (
+        <p className="mt-3 rounded-xl border border-ink-700/60 bg-ink-850/40 p-4 text-center text-[12.5px] text-mist-500">
+          Общие обещания ещё не добавлены
+        </p>
+      ) : (
+        <div className="mt-3 flex flex-col gap-1.5">
+          {items.map((gp) => (
+            <button
+              key={gp.id}
+              onClick={() => onNavigateGeneral(gp.id)}
+              className="group flex flex-col gap-1.5 rounded-lg border border-transparent px-3 py-2.5 text-left transition hover:border-ink-700/70 hover:bg-ink-850/80"
+            >
+              <span className="flex items-start justify-between gap-2">
+                <span className="min-w-0 flex-1 text-[13px] font-medium leading-snug text-mist-200 transition group-hover:text-mist-100">
+                  {gp.title}
+                </span>
+                <ArrowRightIcon />
+              </span>
+              {parseDepartments(gp.who).length > 0 && (
+                <span className="flex flex-wrap gap-1">
+                  {parseDepartments(gp.who).map((dept) => (
+                    <span
+                      key={dept}
+                      className="rounded-full border border-ink-700/60 bg-ink-850 px-2 py-0.5 text-[10px] font-semibold text-mist-400"
+                    >
+                      {dept}
+                    </span>
+                  ))}
+                </span>
+              )}
+              {gp.metrics && <span className="text-[11px] text-mist-500">{gp.metrics}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -186,7 +242,15 @@ function Connections({ node, parent, children, onNavigate }: ConnectionsProps) {
   );
 }
 
-function PanelFooter({ node, valueNode, onNavigate }: { node: GraphNode; valueNode: GraphNode | null; onNavigate: (id: string) => void }) {
+function PanelFooter({
+  node,
+  valueNode,
+  onNavigate,
+}: {
+  node: GraphNode;
+  valueNode: GraphNode | null;
+  onNavigate: (id: string) => void;
+}) {
   const showBranchLink = valueNode && node.tier !== "company";
 
   return (
@@ -209,10 +273,84 @@ function PanelFooter({ node, valueNode, onNavigate }: { node: GraphNode; valueNo
   );
 }
 
+/**
+ * Карточка общего (клиентократического) обещания компании.
+ */
+function GeneralPromiseCard({
+  promise,
+  onClose,
+  onBackToCompany,
+}: {
+  promise: GeneralPromiseDef;
+  onClose: () => void;
+  onBackToCompany: () => void;
+}) {
+  return (
+    <>
+      <div
+        className="h-1 w-full shrink-0"
+        style={{ background: `linear-gradient(90deg, ${CORE_COLOR}, ${CORE_COLOR}33 70%, transparent)` }}
+      />
+
+      <div className="panel-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <div className="flex items-start justify-between gap-3">
+          <span
+            className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[10.5px] font-semibold uppercase tracking-[0.14em]"
+            style={{ borderColor: `${CORE_COLOR}55`, color: CORE_COLOR, background: `${CORE_COLOR}12` }}
+          >
+            <span className="h-1.5 w-1.5 rounded-full" style={{ background: CORE_COLOR }} />
+            Общее обещание
+          </span>
+          <button
+            onClick={onClose}
+            aria-label="Закрыть карточку"
+            className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-ink-700/70 text-mist-400 transition hover:border-mist-500 hover:text-mist-100"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+
+        <h2 className="font-display mt-4 text-[21px] leading-snug font-medium text-mist-100">
+          {promise.title}
+        </h2>
+
+        <p className="mt-4 text-[14px] leading-relaxed text-mist-300">{promise.description}</p>
+
+        <dl className="mt-5 space-y-3 border-t border-ink-700/60 pt-5">
+          {promise.who && <MetaRow label="Кто даёт" value={promise.who} color={CORE_COLOR} />}
+          {promise.toWhom && <MetaRow label="Кому" value={promise.toWhom} color={CORE_COLOR} />}
+          {promise.metrics && <MetaRow label="Метрики" value={promise.metrics} color={CORE_COLOR} />}
+        </dl>
+      </div>
+
+      <div className="flex shrink-0 items-center justify-between gap-3 border-t border-ink-700/60 px-6 py-3.5">
+        <button onClick={onBackToCompany} className="group flex min-w-0 items-center gap-2 text-left">
+          <ArrowUpIcon />
+          <span className="truncate text-[11.5px] text-mist-500 transition group-hover:text-mist-300">
+            уровень выше: <span className="font-medium text-mist-400">ядро компании</span>
+          </span>
+        </button>
+        <span className="shrink-0 text-[10.5px] uppercase tracking-[0.16em] text-mist-500/70">Esc — закрыть</span>
+      </div>
+    </>
+  );
+}
+
 // ─── Main Component ──────────────────────────────────────────────
 
-export default function DetailPanel({ node, parent, children, valueNode, onClose, onNavigate }: Props) {
-  const isOpen = node !== null;
+export default function DetailPanel({
+  node,
+  parent,
+  children,
+  valueNode,
+  generalPromises,
+  generalPromise,
+  onClose,
+  onNavigate,
+  onNavigateGeneral,
+  onBackToCompany,
+}: Props) {
+  const isOpen = node !== null || generalPromise !== null;
 
   const panelClasses = [
     "pointer-events-auto absolute z-30 flex flex-col border-ink-700/60 bg-ink-900/95 backdrop-blur-md",
@@ -225,7 +363,13 @@ export default function DetailPanel({ node, parent, children, valueNode, onClose
 
   return (
     <aside aria-hidden={!isOpen} className={panelClasses}>
-      {node && (
+      {generalPromise ? (
+        <GeneralPromiseCard
+          promise={generalPromise}
+          onClose={onClose}
+          onBackToCompany={onBackToCompany}
+        />
+      ) : node ? (
         <>
           <div
             className="h-1 w-full shrink-0"
@@ -235,12 +379,15 @@ export default function DetailPanel({ node, parent, children, valueNode, onClose
           <div className="panel-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
             <PanelHeader node={node} onClose={onClose} />
             <NodeContent node={node} />
+            {node.tier === "company" && (
+              <GeneralPromisesSection items={generalPromises} onNavigateGeneral={onNavigateGeneral} />
+            )}
             <Connections node={node} parent={parent} children={children} onNavigate={onNavigate} />
           </div>
 
           <PanelFooter node={node} valueNode={valueNode} onNavigate={onNavigate} />
         </>
-      )}
+      ) : null}
     </aside>
   );
 }
