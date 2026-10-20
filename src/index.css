@@ -156,4 +156,5 @@ svg text { user-select: none; }
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  html { --bust: 2; }
 }
