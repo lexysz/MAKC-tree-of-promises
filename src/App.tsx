@@ -2,21 +2,12 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import type { TreeCanvasHandle } from "./components/TreeCanvas";
 import TreeCanvas from "./components/TreeCanvas";
 import DetailPanel from "./components/DetailPanel";
-import Header from "./components/Header";
-import Legend from "./components/Legend";
-import ZoomControls from "./components/ZoomControls";
-import KeyboardHints from "./components/KeyboardHints";
 import AdminPanel from "./components/admin/AdminPanel";
 import AdminLogin from "./components/admin/AdminLogin";
 import DepartmentFilterPanel from "./components/DepartmentFilterPanel";
-import LoadingScreen from "./components/LoadingScreen";
-import BackgroundGradient from "./components/BackgroundGradient";
-import DustParticles from "./components/DustParticles";
 import { useTreeData } from "./state/useTreeData";
 import { useAuth } from "./lib/useAuth";
 import { buildGraph, collectFamily, type GraphNode } from "./lib/layout";
-import { useSearch } from "./lib/useSearch";
-import { useKeyboardShortcuts } from "./lib/useKeyboardShortcuts";
 import { matchesDepartment, parseDepartments, type DepartmentInfo } from "./lib/departments";
 import { supabase } from "./lib/supabase";
 
@@ -42,22 +33,18 @@ interface FilteredNode {
 
 export default function App() {
   const { data, modified, loading, updateNode, updateCompany, replaceValues, reset, updateNodePosition, resetAllPositions } = useTreeData();
-  const { session, checking, authed } = useAuth();
+  const { checking, authed } = useAuth();
   const [view, setView] = useState<View>("tree");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedGeneralId, setSelectedGeneralId] = useState<string | null>(null);
   const [departmentFilter, setDepartmentFilter] = useState<string | null>(null);
   const [showDepartmentPanel, setShowDepartmentPanel] = useState(false);
-  // Запоминаем, была ли открыта панель фильтра до открытия карточки,
-  // чтобы восстановить её после закрытия карточки
   const [panelStateBeforeCard, setPanelStateBeforeCard] = useState<boolean | null>(null);
   const canvasRef = useRef<TreeCanvasHandle>(null);
-  // Пропускаем первую центровку: начальную анимацию делает сам TreeCanvas
   const firstCameraRun = useRef(true);
 
   const graph = useMemo(() => buildGraph(data.company, data.values, data.customPositions), [data]);
   const byId = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
-  const search = useSearch(graph.nodes);
 
   const generalPromises = data.generalPromises ?? [];
 
@@ -74,7 +61,6 @@ export default function App() {
 
   /**
    * Массив предков для хлебных крошек: от ценности до непосредственного родителя.
-   * Порядок — от верхнего уровня к нижнему (ценность → корневое → поддерживающее).
    */
   const ancestors = useMemo(() => {
     if (!selectedNode) return [];
@@ -83,7 +69,6 @@ export default function App() {
     const chain: GraphNode[] = [];
     let current = selectedNode;
 
-    // Идём вверх по parentId, собирая предков (без самой компании)
     while (current.parentId) {
       const parent = byId.get(current.parentId);
       if (!parent || parent.tier === "company") break;
@@ -93,12 +78,6 @@ export default function App() {
 
     return chain;
   }, [selectedNode, byId]);
-
-  const counts = useMemo(() => {
-    const c = { value: 0, root: 0, support: 0, general: generalPromises.length };
-    for (const n of graph.nodes) if (n.tier in c) c[n.tier as keyof typeof c] += 1;
-    return c;
-  }, [graph, generalPromises]);
 
   useEffect(() => {
     if (selectedId && !byId.has(selectedId)) setSelectedId(null);
@@ -110,7 +89,6 @@ export default function App() {
     }
   }, [generalPromises, selectedGeneralId]);
 
-  /** Скрывает панель фильтра при открытии карточки, запоминая её состояние */
   const hidePanelForCard = () => {
     if (showDepartmentPanel && panelStateBeforeCard === null) {
       setPanelStateBeforeCard(true);
@@ -137,17 +115,13 @@ export default function App() {
   const clearSelection = () => {
     setSelectedId(null);
     setSelectedGeneralId(null);
-    // Возвращаемся к фильтрации: восстанавливаем панель, если она была открыта до карточки
     if (panelStateBeforeCard) {
       setShowDepartmentPanel(true);
       setPanelStateBeforeCard(null);
     }
   };
 
-  useKeyboardShortcuts(view, canvasRef, clearSelection);
-
-  // Единая точка управления камерой: срабатывает ПОСЛЕ коммита DOM,
-  // когда контейнер канваса уже получил финальную ширину.
+  // Управление камерой
   useEffect(() => {
     if (firstCameraRun.current) {
       firstCameraRun.current = false;
@@ -166,9 +140,7 @@ export default function App() {
     return () => cancelAnimationFrame(raf);
   }, [selectedId, selectedGeneralId, showDepartmentPanel, byId]);
 
-  // ─── Фильтрация по подразделениям ──────────────────────────────
-
-  // Извлекаем уникальные подразделения из поля «Кто даёт» (узлы + общие обещания)
+  // Фильтрация по подразделениям
   const departments: DepartmentInfo[] = useMemo(() => {
     const deptMap = new Map<string, number>();
 
@@ -190,7 +162,6 @@ export default function App() {
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [graph.nodes, generalPromises]);
 
-  // Находим узлы дерева, где выбранное подразделение фигурирует в поле «Кто даёт»
   const filterHighlightIds = useMemo(() => {
     if (!departmentFilter) return null;
 
@@ -204,7 +175,6 @@ export default function App() {
     return ids;
   }, [departmentFilter, graph.nodes]);
 
-  // Формируем список отфильтрованных обещаний (узлы + общие) с деталями
   const filteredNodes: FilteredNode[] = useMemo(() => {
     if (!departmentFilter) return [];
 
@@ -255,10 +225,10 @@ export default function App() {
 
   if (loading || checking) {
     return (
-      <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
-        <BackgroundGradient />
-        <DustParticles />
-        <LoadingScreen message={checking ? "Проверка авторизации..." : "Загрузка данных из облака..."} />
+      <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100 flex items-center justify-center">
+        <div className="text-mist-100 text-lg">
+          {checking ? "Проверка авторизации..." : "Загрузка данных из облака..."}
+        </div>
       </div>
     );
   }
@@ -266,8 +236,6 @@ export default function App() {
   if (view === "admin") {
     return (
       <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
-        <BackgroundGradient />
-        <DustParticles />
         {authed ? (
           <AdminPanel
             data={data}
@@ -289,9 +257,6 @@ export default function App() {
 
   return (
     <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
-      <BackgroundGradient />
-      <DustParticles />
-
       <div className="absolute inset-0">
         <TreeCanvas
           ref={canvasRef}
@@ -310,30 +275,13 @@ export default function App() {
         />
       </div>
 
-      <div
-        className="pointer-events-none absolute inset-0"
-        style={{ background: "radial-gradient(ellipse at center, transparent 52%, rgba(4,10,15,0.55) 100%)" }}
-      />
-
-      <Header
-        companyTitle={data.company.title}
-        companyLogo={data.company.logo}
-        counts={counts}
-        search={search}
-        onAdminClick={() => setView("admin")}
-        onNavigate={navigate}
-        onDepartmentFilterClick={() => {
-          const next = !showDepartmentPanel;
-          setShowDepartmentPanel(next);
-          // Панель открыта вручную — автовозврат после карточки не нужен
-          if (next) setPanelStateBeforeCard(null);
-        }}
-        isFilterActive={departmentFilter !== null}
-      />
-
-      <Legend companyLogo={data.company.logo} />
-      <KeyboardHints isAdmin={authed} />
-      <ZoomControls canvasRef={canvasRef} />
+      {/* Кнопка переключения в админ-панель */}
+      <button
+        onClick={() => setView("admin")}
+        className="absolute top-4 right-4 z-40 rounded-lg border border-ink-700 bg-ink-900/80 px-4 py-2 text-sm text-mist-100 backdrop-blur-sm transition hover:bg-ink-800"
+      >
+        Админ-панель
+      </button>
 
       <DetailPanel
         node={selectedNode}
