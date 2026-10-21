@@ -95,8 +95,9 @@ function sanitizeTree(data: TreeData): TreeData {
     gp.metrics = typeof gp.metrics === "string" ? gp.metrics : undefined;
   }
 
-  return data;
+return data;
 }
+
 /** Рекурсивно ищет узел поддержки по ID во всех уровнях вложенности. */
 function findSupportById(
   supports: SupportDef[] | undefined,
@@ -124,6 +125,7 @@ function findNode(data: TreeData, id: string) {
   }
   return null;
 }
+
 /** Пересчитывает цвета ценностей на основе их порядка. */
 function reassignColors(data: TreeData): TreeData {
   return {
