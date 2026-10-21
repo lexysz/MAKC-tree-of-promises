@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { createEmptyTree, getValueColor } from "../data/tree";
-import type { CompanyDef, TreeData, ValueDef, GeneralPromiseDef } from "../data/tree";
+import { createEmptyTree, getValueColor, MAX_TREE_DEPTH } from "../data/tree";
+import type { CompanyDef, TreeData, ValueDef, GeneralPromiseDef, SupportDef } from "../data/tree";
 import { supabase } from "../lib/supabase";
 
 const STORAGE_KEY = "promise-tree-data-v8";
@@ -43,6 +43,20 @@ function sanitizeTree(data: TreeData): TreeData {
   const str = (value: unknown, fallback = ""): string =>
     typeof value === "string" ? value : fallback;
 
+ /** Рекурсивно нормализует вложенные поддерживающие обещания с лимитом глубины. */
+  const sanitizeSupports = (supports: unknown[], depth: number): SupportDef[] => {
+    return (Array.isArray(supports) ? supports : [])
+      .filter((s) => s && typeof s === "object")
+      .map((support) => {
+        const s = support as SupportDef;
+        s.title = str(s.title);
+        s.description = str(s.description, s.title);
+        s.supports = depth < MAX_TREE_DEPTH
+          ? sanitizeSupports(s.supports ?? [], depth + 1)
+          : [];
+        return s;
+      });
+  };
   if (!data || typeof data !== "object") return createEmptyTree();
   if (!data.company || typeof data.company !== "object") {
     data.company = createEmptyTree().company;
@@ -67,12 +81,7 @@ function sanitizeTree(data: TreeData): TreeData {
       root.title = str(root.title);
       root.short = str(root.short, root.title);
       root.description = str(root.description, root.title);
-      if (!Array.isArray(root.supports)) root.supports = [];
-
-      root.supports = root.supports.filter((s) => s && typeof s === "object");
-      for (const support of root.supports) {
-        support.title = str(support.title);
-        support.description = str(support.description, support.title);
+      root.supports = sanitizeSupports(root.supports ?? [], 3);
       }
     }
   }
@@ -88,23 +97,33 @@ function sanitizeTree(data: TreeData): TreeData {
 
   return data;
 }
-
-/** Находит узел в дереве по ID. */
-function findNode(data: TreeData, id: string) {
-  if (data.company.id === id) return data.company;
-
-  for (const value of data.values) {
-    if (value.id === id) return value;
-    for (const root of value.promises) {
-      if (root.id === id) return root;
-      for (const support of root.supports) {
-        if (support.id === id) return support;
-      }
-    }
+/** Рекурсивно ищет узел поддержки по ID во всех уровнях вложенности. */
+function findSupportById(
+  supports: SupportDef[] | undefined,
+  id: string
+): SupportDef | null {
+  if (!supports) return null;
+  for (const support of supports) {
+    if (support.id === id) return support;
+    const found = findSupportById(support.supports, id);
+    if (found) return found;
   }
   return null;
 }
 
+/** Находит узел в дереве по ID (включая вложенные поддерживающие обещания). */
+function findNode(data: TreeData, id: string) {
+  if (data.company.id === id) return data.company;
+  for (const value of data.values) {
+    if (value.id === id) return value;
+    for (const root of value.promises) {
+      if (root.id === id) return root;
+      const support = findSupportById(root.supports, id);
+      if (support) return support;
+    }
+  }
+  return null;
+}
 /** Пересчитывает цвета ценностей на основе их порядка. */
 function reassignColors(data: TreeData): TreeData {
   return {
