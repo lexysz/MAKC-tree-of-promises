@@ -6,15 +6,15 @@ export interface CompanyDef {
   logo?: string;
 }
 
- export interface SupportDef {
-   id: string;
-   title: string;
-   description: string;
-   who?: string;
-   toWhom?: string;
-   metrics?: string;
-   supports?: SupportDef[];
- }
+export interface SupportDef {
+  id: string;
+  title: string;
+  description: string;
+  who?: string;
+  toWhom?: string;
+  metrics?: string;
+  supports?: SupportDef[];
+}
 
 export interface RootDef {
   id: string;
@@ -90,7 +90,9 @@ export function createEmptyTree(): TreeData {
     values: [],
     generalPromises: [],
   };
-  /**
+}
+
+/**
  * Максимальная глубина дерева:
  * 0 = company, 1 = value, 2 = root, 3 = support, 4 = support 2-го уровня
  */
@@ -137,5 +139,4 @@ function findSupportInSupports(
     if (found) return found;
   }
   return null;
-}
 }
