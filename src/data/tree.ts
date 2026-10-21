@@ -13,7 +13,7 @@ export interface CompanyDef {
    who?: string;
    toWhom?: string;
    metrics?: string;
-+  supports?: SupportDef[];
+   supports?: SupportDef[];
  }
 
 export interface RootDef {
