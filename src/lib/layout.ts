@@ -1,4 +1,4 @@
-import type { CompanyDef, Tier, ValueDef } from "../data/tree";
+import type { CompanyDef, Tier, ValueDef, SupportDef } from "../data/tree";
 
 export interface GraphNode {
   id: string;
@@ -73,6 +73,19 @@ function trimmed(
   ];
 }
 
+/**
+ * Подсчитывает общее количество поддерживающих обещаний всех уровней вложенности.
+ */
+function countAllSupports(values: ValueDef[]): number {
+  const countSupport = (supports: SupportDef[]): number => {
+    return supports.reduce((sum, s) => sum + 1 + countSupport(s.supports ?? []), 0);
+  };
+
+  return values.reduce((sum, v) => {
+    return sum + v.promises.reduce((sum2, r) => sum2 + countSupport(r.supports ?? []), 0);
+  }, 0);
+}
+
 export function buildGraph(
   company: CompanyDef,
   values: ValueDef[],
@@ -87,15 +100,13 @@ export function buildGraph(
   const nodeIds = new Set<string>();
 
   const totalRoots = values.reduce((sum, v) => sum + v.promises.length, 0);
-  const totalSupports = values.reduce(
-    (sum, v) => sum + v.promises.reduce((sum2, r) => sum2 + r.supports.length, 0),
-    0,
-  );
+  const totalSupports = countAllSupports(values);
 
   const scaleFactor = Math.max(1, Math.sqrt(values.length + totalRoots + totalSupports) / 5);
   const valueRingR = Math.max(1050, minRingRadius(values.length, NODE_R.value));
   const rootRingR = Math.max(valueRingR + 900 * scaleFactor, minRingRadius(totalRoots, NODE_R.root));
   const supportRingR = Math.max(rootRingR + 840 * scaleFactor, minRingRadius(totalSupports, NODE_R.support));
+  const support2RingR = supportRingR + 600 * scaleFactor; // Кольцо для поддерживающих 2-го уровня
 
   // Add company core
   if (!nodeIds.has(company.id)) {
@@ -181,41 +192,23 @@ export function buildGraph(
         });
       }
 
-      const supportCount = root.supports.length;
-      if (supportCount === 0) return;
-
-      const subSectorWidth = rootStep;
-      const supportStep = subSectorWidth / supportCount;
-
-      root.supports.forEach((sup, t) => {
-        const supportAngle = rootAngle - subSectorWidth / 2 + supportStep * (t + 0.5);
-        const sx = Math.cos(supportAngle) * supportRingR;
-        const sy = Math.sin(supportAngle) * supportRingR;
-
-        // Add supporting promise
-        if (!nodeIds.has(sup.id)) {
-          nodeIds.add(sup.id);
-          nodes.push({
-            id: sup.id,
-            tier: "support",
-            title: sup.title,
-            short: "",
-            description: sup.description,
-            parentId: root.id,
-            familyId: value.id,
-            familyTitle: value.title,
-            color: value.color,
-            x: sx,
-            y: sy,
-            r: NODE_R.support,
-            delay: 0.95 + i * 0.05 + j * 0.04 + t * 0.045,
-            childrenIds: [],
-            who: sup.who,
-            toWhom: sup.toWhom,
-            metrics: sup.metrics,
-          });
-        }
-      });
+      // Рекурсивная обработка поддерживающих обещаний
+      processSupports(
+        root.supports ?? [],
+        root.id,
+        rootAngle,
+        rootStep,
+        value.id,
+        value.title,
+        value.color,
+        i,
+        j,
+        supportRingR,
+        support2RingR,
+        nodes,
+        nodeIds,
+        0
+      );
     });
   });
 
@@ -266,6 +259,85 @@ export function buildGraph(
   }
 
   return { nodes, edges, bounds: { minX, minY, maxX, maxY } };
+}
+
+/**
+ * Рекурсивно обрабатывает поддерживающие обещания и их вложенные уровни.
+ * depth: 0 = первый уровень (от корневого), 1 = второй уровень (от поддерживающего)
+ */
+function processSupports(
+  supports: SupportDef[],
+  parentId: string,
+  parentAngle: number,
+  parentStep: number,
+  familyId: string,
+  familyTitle: string,
+  color: string,
+  valueIdx: number,
+  rootIdx: number,
+  ringR: number,
+  ringR2: number,
+  nodes: GraphNode[],
+  nodeIds: Set<string>,
+  depth: number
+): void {
+  if (supports.length === 0) return;
+
+  const supportCount = supports.length;
+  const subSectorWidth = parentStep;
+  const supportStep = subSectorWidth / supportCount;
+
+  supports.forEach((sup, t) => {
+    const supportAngle = parentAngle - subSectorWidth / 2 + supportStep * (t + 0.5);
+    const sx = Math.cos(supportAngle) * (depth === 0 ? ringR : ringR2);
+    const sy = Math.sin(supportAngle) * (depth === 0 ? ringR : ringR2);
+
+    // Add supporting promise
+    if (!nodeIds.has(sup.id)) {
+      nodeIds.add(sup.id);
+      nodes.push({
+        id: sup.id,
+        tier: "support",
+        title: sup.title,
+        short: "",
+        description: sup.description,
+        parentId,
+        familyId,
+        familyTitle,
+        color,
+        x: sx,
+        y: sy,
+        r: NODE_R.support,
+        delay: depth === 0
+          ? 0.95 + valueIdx * 0.05 + rootIdx * 0.04 + t * 0.045
+          : 1.25 + valueIdx * 0.05 + rootIdx * 0.04 + t * 0.045,
+        childrenIds: sup.supports?.map((s) => s.id) ?? [],
+        who: sup.who,
+        toWhom: sup.toWhom,
+        metrics: sup.metrics,
+      });
+    }
+
+    // Рекурсивно обрабатываем следующий уровень (максимум depth = 1)
+    if (depth < 1 && sup.supports && sup.supports.length > 0) {
+      processSupports(
+        sup.supports,
+        sup.id,
+        supportAngle,
+        supportStep,
+        familyId,
+        familyTitle,
+        color,
+        valueIdx,
+        rootIdx,
+        ringR,
+        ringR2,
+        nodes,
+        nodeIds,
+        depth + 1
+      );
+    }
+  });
 }
 
 export function collectFamily(id: string, byId: Map<string, GraphNode>): Set<string> {
