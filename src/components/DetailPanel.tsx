@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { GraphNode } from "../lib/layout";
 import type { GeneralPromiseDef } from "../data/tree";
 import { TIER_LABEL } from "../data/tree";
@@ -11,6 +12,7 @@ const CHILDREN_LABELS: Record<string, string> = {
   company: "Ценности",
   value: "Корневые обещания",
   root: "Поддерживающие обещания",
+  support: "Поддерживающие обещания (цепочка)",
 };
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -22,13 +24,19 @@ interface Props {
   valueNode: GraphNode | null;
   generalPromises: GeneralPromiseDef[];
   generalPromise: GeneralPromiseDef | null;
+  /**
+   * Предки текущего узла по цепочке: от ценности до непосредственного родителя.
+   * Без ядра компании. Порядок — от верхнего уровня к нижнему.
+   * Необязателен: без него крошки строятся только от ближайшего родителя.
+   */
+  ancestors?: GraphNode[];
   onClose: () => void;
   onNavigate: (id: string) => void;
   onNavigateGeneral: (id: string) => void;
   onBackToCompany: () => void;
 }
 
-// ─── Icons ──────────────────────────────────────────────────────
+// ─── Icons ─────────────────────────────────────────────────────
 
 function CloseIcon() {
   return (
@@ -49,6 +57,14 @@ function ArrowUpIcon() {
 function ArrowRightIcon() {
   return (
     <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="shrink-0 text-mist-500 transition group-hover:translate-x-0.5 group-hover:text-mist-300">
+      <path d="M3.5 2l3 3-3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function CrumbSeparatorIcon() {
+  return (
+    <svg width="8" height="8" viewBox="0 0 10 10" fill="none" className="shrink-0 text-mist-500/50">
       <path d="M3.5 2l3 3-3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
@@ -118,7 +134,90 @@ function NodeContent({ node }: { node: GraphNode }) {
 }
 
 /**
+ * Глубина поддерживающего обещания внутри цепочки:
+ * 1 — первое поддерживающее от корневого, 2 — поддерживающее второго уровня.
+ */
+function getSupportDepth(ancestors: GraphNode[], node: GraphNode): number {
+  if (node.tier !== "support") return 0;
+  return 1 + ancestors.filter((ancestor) => ancestor.tier === "support").length;
+}
+
+/**
+ * Путь по дереву: ценность → корневое → поддерживающее → текущий узел.
+ * Предки кликабельны, текущий узел — нет.
+ */
+function Breadcrumbs({
+  ancestors,
+  node,
+  onNavigate,
+}: {
+  ancestors: GraphNode[];
+  node: GraphNode;
+  onNavigate: (id: string) => void;
+}) {
+  if (node.tier === "company" || ancestors.length === 0) return null;
+
+  const items = [...ancestors, node];
+  const supportDepth = getSupportDepth(ancestors, node);
+
+  return (
+    <nav
+      aria-label="Путь по дереву обещаний"
+      className="mt-3 flex flex-wrap items-center gap-x-1 gap-y-1"
+    >
+      {items.map((item, index) => {
+        const isCurrent = index === items.length - 1;
+        const isSecondLevelSupport =
+          isCurrent && item.tier === "support" && supportDepth > 1;
+
+        return (
+          <span key={item.id} className="flex min-w-0 items-center gap-1">
+            {index > 0 && <CrumbSeparatorIcon />}
+
+            {isCurrent ? (
+              <span
+                aria-current="page"
+                title={item.title}
+                className="flex min-w-0 items-center gap-1.5 rounded-md bg-ink-800/70 px-1.5 py-1"
+              >
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full"
+                  style={{ background: item.color }}
+                />
+                <span className="max-w-[150px] truncate text-[11px] font-medium text-mist-100">
+                  {item.title}
+                </span>
+                {isSecondLevelSupport && (
+                  <span className="shrink-0 rounded-full border border-ink-700/70 px-1.5 py-0.5 text-[8.5px] font-semibold uppercase tracking-[0.08em] text-mist-400">
+                    ур. 2
+                  </span>
+                )}
+              </span>
+            ) : (
+              <button
+                onClick={() => onNavigate(item.id)}
+                title={item.title}
+                className="group flex min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 transition hover:bg-ink-800/60"
+              >
+                <span
+                  className="h-1.5 w-1.5 shrink-0 rounded-full opacity-70 transition group-hover:opacity-100"
+                  style={{ background: item.color }}
+                />
+                <span className="max-w-[130px] truncate text-[11px] text-mist-500 transition group-hover:text-mist-200">
+                  {item.title}
+                </span>
+              </button>
+            )}
+          </span>
+        );
+      })}
+    </nav>
+  );
+}
+
+/**
  * Секция карточки компании: витрина общих (клиентократических) обещаний.
+ * Размещается ПОСЛЕ секции связей дерева (ценностей).
  */
 function GeneralPromisesSection({
   items,
@@ -184,6 +283,8 @@ interface ConnectionsProps {
 
 function Connections({ node, parent, children, onNavigate }: ConnectionsProps) {
   const childrenLabel = CHILDREN_LABELS[node.tier] || "Связи";
+  // Дочерние узлы support-узла — это поддерживающие второго уровня.
+  const isChainLevel = node.tier === "support";
 
   return (
     <div className="mt-6 border-t border-ink-700/60 pt-5">
@@ -212,6 +313,13 @@ function Connections({ node, parent, children, onNavigate }: ConnectionsProps) {
             <span className="text-[11px] font-medium text-mist-400">{childrenLabel}</span>
             <span className="text-[11px] text-mist-500">{children.length}</span>
           </div>
+
+          {isChainLevel && (
+            <p className="mb-2 text-[11px] leading-relaxed text-mist-500">
+              Это продолжение цепочки поддерживающих обещаний. Клик — открыть карточку.
+            </p>
+          )}
+
           <div className="flex flex-col gap-1.5">
             {children.map((child) => (
               <button
@@ -232,6 +340,11 @@ function Connections({ node, parent, children, onNavigate }: ConnectionsProps) {
                 <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-mist-200 transition group-hover:text-mist-100">
                   {child.title}
                 </span>
+                {isChainLevel && (
+                  <span className="shrink-0 rounded-full border border-ink-700/60 bg-ink-850 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-mist-400">
+                    уровень 2
+                  </span>
+                )}
                 <ArrowRightIcon />
               </button>
             ))}
@@ -345,12 +458,20 @@ export default function DetailPanel({
   valueNode,
   generalPromises,
   generalPromise,
+  ancestors,
   onClose,
   onNavigate,
   onNavigateGeneral,
   onBackToCompany,
 }: Props) {
   const isOpen = node !== null || generalPromise !== null;
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // При переходе по цепочке начинаем карточку с начала, а не с позиции скролла прошлой.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = 0;
+  }, [node?.id, generalPromise?.id]);
 
   const panelClasses = [
     "pointer-events-auto absolute z-30 flex flex-col border-ink-700/60 bg-ink-900/95 backdrop-blur-md",
@@ -360,6 +481,9 @@ export default function DetailPanel({
     "max-md:inset-x-0 max-md:bottom-0 max-md:max-h-[62vh] max-md:rounded-t-2xl max-md:border-t",
     isOpen ? "max-md:translate-y-0" : "max-md:translate-y-full",
   ].join(" ");
+
+  // Фолбэк для случая, когда полный путь ещё не передаётся из App.
+  const ancestorChain = ancestors ?? (parent ? [parent] : []);
 
   return (
     <aside aria-hidden={!isOpen} className={panelClasses}>
@@ -376,13 +500,19 @@ export default function DetailPanel({
             style={{ background: `linear-gradient(90deg, ${node.color}, ${node.color}33 70%, transparent)` }}
           />
 
-          <div className="panel-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <div ref={scrollRef} className="panel-scroll min-h-0 flex-1 overflow-y-auto px-6 py-5">
             <PanelHeader node={node} onClose={onClose} />
+
+            <Breadcrumbs ancestors={ancestorChain} node={node} onNavigate={onNavigate} />
+
             <NodeContent node={node} />
+
+            {/* Сначала ценности (связи дерева), затем общие обещания. */}
+            <Connections node={node} parent={parent} children={children} onNavigate={onNavigate} />
+
             {node.tier === "company" && (
               <GeneralPromisesSection items={generalPromises} onNavigateGeneral={onNavigateGeneral} />
             )}
-            <Connections node={node} parent={parent} children={children} onNavigate={onNavigate} />
           </div>
 
           <PanelFooter node={node} valueNode={valueNode} onNavigate={onNavigate} />
