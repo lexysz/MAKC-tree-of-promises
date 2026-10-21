@@ -43,7 +43,7 @@ function sanitizeTree(data: TreeData): TreeData {
   const str = (value: unknown, fallback = ""): string =>
     typeof value === "string" ? value : fallback;
 
- /** Рекурсивно нормализует вложенные поддерживающие обещания с лимитом глубины. */
+  /** Рекурсивно нормализует вложенные поддерживающие обещания с лимитом глубины. */
   const sanitizeSupports = (supports: unknown[], depth: number): SupportDef[] => {
     return (Array.isArray(supports) ? supports : [])
       .filter((s) => s && typeof s === "object")
@@ -57,10 +57,13 @@ function sanitizeTree(data: TreeData): TreeData {
         return s;
       });
   };
+
   if (!data || typeof data !== "object") return createEmptyTree();
+
   if (!data.company || typeof data.company !== "object") {
     data.company = createEmptyTree().company;
   }
+
   if (!Array.isArray(data.values)) data.values = [];
   if (!Array.isArray(data.generalPromises)) data.generalPromises = [];
 
@@ -69,20 +72,21 @@ function sanitizeTree(data: TreeData): TreeData {
   data.company.description = str(data.company.description);
 
   data.values = data.values.filter((v) => v && typeof v === "object");
+
   for (const value of data.values) {
     value.title = str(value.title);
     value.short = str(value.short);
     value.description = str(value.description);
     value.color = str(value.color, getValueColor(0));
-    if (!Array.isArray(value.promises)) value.promises = [];
 
+    if (!Array.isArray(value.promises)) value.promises = [];
     value.promises = value.promises.filter((r) => r && typeof r === "object");
+
     for (const root of value.promises) {
       root.title = str(root.title);
       root.short = str(root.short, root.title);
       root.description = str(root.description, root.title);
       root.supports = sanitizeSupports(root.supports ?? [], 3);
-      }
     }
   }
 
@@ -95,7 +99,7 @@ function sanitizeTree(data: TreeData): TreeData {
     gp.metrics = typeof gp.metrics === "string" ? gp.metrics : undefined;
   }
 
-return data;
+  return data;
 }
 
 /** Рекурсивно ищет узел поддержки по ID во всех уровнях вложенности. */
