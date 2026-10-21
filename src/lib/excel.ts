@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
-import { getValueColor } from "../data/tree";
-import type { GeneralPromiseDef, RootDef, ValueDef } from "../data/tree";
+import { getValueColor, findSupportByTitle } from "../data/tree";
+import type { GeneralPromiseDef, RootDef, ValueDef, SupportDef } from "../data/tree";
 
 export interface ImportResult {
   values: ValueDef[];
@@ -12,6 +12,7 @@ export interface ImportResult {
     roots: number;
     supports: number;
     general: number;
+    chains: number;
   };
 }
 
@@ -29,6 +30,15 @@ export const TEMPLATE_HEADERS = [
 
 export const GENERAL_TEMPLATE_HEADERS = [
   "Общее обещание",
+  "Описание",
+  "Кто дает",
+  "Кому",
+  "Метрики",
+];
+
+export const CHAIN_TEMPLATE_HEADERS = [
+  "Родительское поддерживающее обещание",
+  "Дочернее поддерживающее обещание",
   "Описание",
   "Кто дает",
   "Кому",
@@ -72,11 +82,24 @@ export function downloadTemplate() {
     ],
   ];
 
+  const chainSampleData = [
+    [
+      "Ежемесячный отчёт о стабильности",
+      "Автоматическая генерация отчёта",
+      "Скрипт собирает метрики из всех систем и формирует PDF",
+      "DevOps",
+      "Команда продукта",
+      "Время генерации < 5 минут",
+    ],
+  ];
+
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...sampleData]);
   XLSX.utils.book_append_sheet(wb, ws, "Обещания");
   const wsGeneral = XLSX.utils.aoa_to_sheet([GENERAL_TEMPLATE_HEADERS, ...generalSampleData]);
   XLSX.utils.book_append_sheet(wb, wsGeneral, "Общие обещания");
+  const wsChains = XLSX.utils.aoa_to_sheet([CHAIN_TEMPLATE_HEADERS, ...chainSampleData]);
+  XLSX.utils.book_append_sheet(wb, wsChains, "Поддерживающие (цепочки)");
   XLSX.writeFile(wb, "шаблон_обещаний.xlsx");
 }
 
@@ -199,6 +222,45 @@ function detectGeneralHeader(rows: unknown[][]): GeneralHeaderDetection | null {
   return null;
 }
 
+// ─── Распознавание листа цепочек поддерживающих обещаний ─────────
+
+type ChainFieldKey = "parent" | "child" | "description" | "who" | "toWhom" | "metrics";
+
+const CHAIN_HEADER_RULES: Array<{ key: ChainFieldKey; test: (h: string) => boolean }> = [
+  { key: "parent", test: (h) => h.includes("родит") },
+  { key: "child", test: (h) => h.includes("дочерн") || h.includes("поддерж") },
+  { key: "description", test: (h) => h.includes("описан") },
+  { key: "who", test: (h) => h.includes("кто") },
+  { key: "toWhom", test: (h) => h.includes("кому") },
+  { key: "metrics", test: (h) => h.includes("метри") },
+];
+
+interface ChainHeaderDetection {
+  headerIdx: number;
+  columnMap: Partial<Record<ChainFieldKey, number>>;
+}
+
+function detectChainHeader(rows: unknown[][]): ChainHeaderDetection | null {
+  for (let i = 0; i < Math.min(rows.length, 10); i++) {
+    const row = rows[i];
+    if (!row) continue;
+
+    const map: Partial<Record<ChainFieldKey, number>> = {};
+    row.forEach((cell, idx) => {
+      const h = normHeader(cellStr(cell));
+      if (!h) return;
+      const rule = CHAIN_HEADER_RULES.find((r) => !(r.key in map) && r.test(h));
+      if (rule) map[rule.key] = idx;
+    });
+
+    // Лист считается таблицей цепочек, если есть колонки parent и child
+    if (map.parent !== undefined && map.child !== undefined) {
+      return { headerIdx: i, columnMap: map };
+    }
+  }
+  return null;
+}
+
 // ─── Основной парсинг ────────────────────────────────────────────
 
 export async function parseWorkbook(file: File): Promise<ImportResult> {
@@ -211,7 +273,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   const valuesMap = new Map<string, ValueDef>();
   const rootsMap = new Map<string, RootDef>();
   const rootToValue = new Map<string, string>();
-  const stats = { rows: 0, values: 0, roots: 0, supports: 0, general: 0 };
+  const stats = { rows: 0, values: 0, roots: 0, supports: 0, general: 0, chains: 0 };
 
   const headerDetection = detectMainHeader(rows);
   if (!headerDetection) {
@@ -391,6 +453,99 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         metrics: getGeneral(row, "metrics") || undefined,
       });
       stats.general++;
+    }
+  }
+
+  // ─── Цепочки поддерживающих обещаний: ищем третий лист ───
+
+  let chainSheetName: string | null =
+    workbook.SheetNames.find((n) => n.toLowerCase().includes("цепочк") || n.toLowerCase().includes("поддерж") && !n.toLowerCase().includes("общ")) ?? null;
+  let chainHeader: ChainHeaderDetection | null = chainSheetName
+    ? detectChainHeader(readRows(workbook, chainSheetName))
+    : null;
+
+  if (!chainHeader) {
+    for (const name of workbook.SheetNames) {
+      if (name === sheetName || name === generalSheetName) continue;
+      const detected = detectChainHeader(readRows(workbook, name));
+      if (detected) {
+        chainSheetName = name;
+        chainHeader = detected;
+        break;
+      }
+    }
+  }
+
+  if (chainSheetName && chainHeader) {
+    const chainRows = readRows(workbook, chainSheetName);
+    const { columnMap: cMap } = chainHeader;
+
+    const getChain = (row: unknown[], key: ChainFieldKey): string => {
+      const idx = cMap[key];
+      return idx !== undefined ? cellStr(row[idx]) : "";
+    };
+
+    for (let i = chainHeader.headerIdx + 1; i < chainRows.length; i++) {
+      const row = chainRows[i];
+      if (!row || row.length === 0) continue;
+
+      const parentTitle = getChain(row, "parent");
+      const childTitle = getChain(row, "child");
+
+      if (!parentTitle || !childTitle) {
+        if (parentTitle || childTitle) {
+          warnings.push(
+            `Лист "${chainSheetName}", строка ${i + 1}: отсутствует родительское или дочернее обещание`,
+          );
+        }
+        continue;
+      }
+
+      // Ищем родительское поддерживающее обещание во всех корневых
+      let parentSupport: SupportDef | null = null;
+      for (const value of valuesMap.values()) {
+        parentSupport = findSupportByTitle(value.promises, parentTitle);
+        if (parentSupport) break;
+      }
+
+      if (!parentSupport) {
+        warnings.push(
+          `Лист "${chainSheetName}", строка ${i + 1}: не найдено родительское обещание "${parentTitle}"`,
+        );
+        continue;
+      }
+
+      // Проверяем, что родительское обещание не имеет своих дочерних (ограничение глубины)
+      if (parentSupport.supports && parentSupport.supports.length > 0) {
+        warnings.push(
+          `Лист "${chainSheetName}", строка ${i + 1}: у "${parentTitle}" уже есть дочерние обещания (максимум 4 уровня дерева)`,
+        );
+        continue;
+      }
+
+      // Проверяем дубликаты
+      if (parentSupport.supports?.some((s) => s.title === childTitle)) {
+        warnings.push(
+          `Лист "${chainSheetName}", строка ${i + 1}: дочернее обещание "${childTitle}" уже есть у "${parentTitle}"`,
+        );
+        continue;
+      }
+
+      // Добавляем дочернее поддерживающее обещание
+      if (!parentSupport.supports) {
+        parentSupport.supports = [];
+      }
+
+      parentSupport.supports.push({
+        id: `s-${slugify(childTitle)}-${parentSupport.supports.length}`,
+        title: childTitle,
+        description: getChain(row, "description") || `Поддерживающее: ${childTitle}`,
+        who: getChain(row, "who") || undefined,
+        toWhom: getChain(row, "toWhom") || undefined,
+        metrics: getChain(row, "metrics") || undefined,
+      });
+
+      stats.chains++;
     }
   }
 
