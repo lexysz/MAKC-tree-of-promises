@@ -6,14 +6,15 @@ export interface CompanyDef {
   logo?: string;
 }
 
-export interface SupportDef {
-  id: string;
-  title: string;
-  description: string;
-  who?: string;
-  toWhom?: string;
-  metrics?: string;
-}
+ export interface SupportDef {
+   id: string;
+   title: string;
+   description: string;
+   who?: string;
+   toWhom?: string;
+   metrics?: string;
++  supports?: SupportDef[];
+ }
 
 export interface RootDef {
   id: string;
@@ -89,4 +90,52 @@ export function createEmptyTree(): TreeData {
     values: [],
     generalPromises: [],
   };
+  /**
+ * Максимальная глубина дерева:
+ * 0 = company, 1 = value, 2 = root, 3 = support, 4 = support 2-го уровня
+ */
+export const MAX_TREE_DEPTH = 4;
+
+/**
+ * Возвращает глубину узла по типу.
+ * Для support-узлов глубина фиксирована — чтобы определить реальную,
+ * нужно пройтись по родителям (см. хелперы в компонентах).
+ */
+export type NodeDepth = 0 | 1 | 2 | 3 | 4;
+
+/**
+ * Рекурсивно ищет SupportDef по title во всех уровнях вложенности supports.
+ * Используется при связывании цепочек из Excel без ID.
+ */
+export function findSupportByTitle(
+  roots: RootDef[] | undefined,
+  title: string
+): SupportDef | null {
+  if (!roots || !title) return null;
+  const normalizedTitle = title.trim().toLowerCase();
+
+  for (const root of roots) {
+    for (const support of root.supports ?? []) {
+      if (support.title.trim().toLowerCase() === normalizedTitle) return support;
+      const found = findSupportInSupports(support.supports, title);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function findSupportInSupports(
+  supports: SupportDef[] | undefined,
+  title: string
+): SupportDef | null {
+  if (!supports || !title) return null;
+  const normalizedTitle = title.trim().toLowerCase();
+
+  for (const support of supports) {
+    if (support.title.trim().toLowerCase() === normalizedTitle) return support;
+    const found = findSupportInSupports(support.supports, title);
+    if (found) return found;
+  }
+  return null;
+}
 }
