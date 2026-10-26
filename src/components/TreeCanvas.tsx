@@ -19,6 +19,20 @@ const GRID_SIZE = 5200;
 const CORE_HALO_RADIUS = 540;
 const DOT_GRID_SIZE = 34;
 
+/**
+ * Декоративные частицы пыли в МИРОВЫХ координатах дерева.
+ * Рендерятся внутри SVG-сцены, поэтому масштабируются и двигаются вместе с деревом.
+ */
+const DUST_PARTICLES = [
+  { x: -1500, y: -1200, r: 4, color: "rgba(67,214,181,0.35)", dur: 17 },
+  { x: 1800, y: -1000, r: 3, color: "rgba(242,180,90,0.32)", dur: 14 },
+  { x: 1200, y: 1500, r: 5, color: "rgba(111,180,242,0.28)", dur: 19 },
+  { x: -1000, y: 1400, r: 3, color: "rgba(242,131,107,0.3)", dur: 15 },
+  { x: 200, y: -1800, r: 2, color: "rgba(155,211,86,0.32)", dur: 13 },
+  { x: 2000, y: 800, r: 4, color: "rgba(67,214,181,0.25)", dur: 21 },
+  { x: -1800, y: 200, r: 2, color: "rgba(242,180,90,0.26)", dur: 16 },
+];
+
 const EDGE_STYLES = {
   background: { width: { active: 18, inactive: 13 }, opacity: { active: 0.2, inactive: 0.08 } },
   foreground: { width: { active: 5.2, inactive: 3.2 }, opacity: { active: 1, inactive: 0.42 } },
@@ -946,6 +960,12 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
     >
       <svg className="block h-full w-full">
         <defs>
+          <style>{`
+            @keyframes svg-float {
+              0% { transform: translate(0, 0); }
+              100% { transform: translate(15px, -20px); }
+            }
+          `}</style>
           <pattern id="dotGrid" width={DOT_GRID_SIZE} height={DOT_GRID_SIZE} patternUnits="userSpaceOnUse">
             <circle cx="1.3" cy="1.3" r="1.15" fill="rgba(147,171,178,0.11)" />
           </pattern>
@@ -995,6 +1015,24 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
               />
             );
           })}
+
+          {/* Частицы пыли — часть SVG-мира: масштабируются и двигаются вместе с деревом */}
+          <g className="dust-particles" pointerEvents="none">
+            {DUST_PARTICLES.map((d, i) => (
+              <circle
+                key={i}
+                cx={d.x}
+                cy={d.y}
+                r={d.r}
+                fill={d.color}
+                style={{
+                  filter: `drop-shadow(0 0 ${d.r * 2}px ${d.color})`,
+                  animation: `svg-float ${d.dur}s ease-in-out infinite alternate`,
+                  animationDelay: `${i * 1.2}s`,
+                }}
+              />
+            ))}
+          </g>
 
           {uniqueNodes.map((node) => {
             const isFilteredOut = isFilterActive && filterHighlightIds ? !filterHighlightIds.has(node.id) : false;
