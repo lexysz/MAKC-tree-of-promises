@@ -6,6 +6,8 @@ import { supabase } from "../lib/supabase";
 const STORAGE_KEY = "promise-tree-data-v8";
 const SAVE_DEBOUNCE_MS = 500;
 
+export type SyncStatus = 'synced' | 'syncing' | 'error';
+
 export interface NodePatch {
   title?: string;
   short?: string;
@@ -192,29 +194,31 @@ async function saveToSupabase(data: TreeData): Promise<void> {
     }
   } catch (error) {
     console.error("Error saving to Supabase:", error);
+    throw error;
   }
 }
 
 // ─── Hook ────────────────────────────────────────────────────────
 
 export function useTreeData() {
-  const [data, setData] = useState<TreeData>(
-    () => loadFromStorage() ?? createEmptyTree(),
-  );
+  const [data, setData] = useState<TreeData>(createEmptyTree());
   const [modified, setModified] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
 
-  // Initial load from Supabase
+  // Initial load from Supabase (primary source)
   useEffect(() => {
     let isMounted = true;
 
     (async () => {
       const supabaseData = await loadFromSupabase();
-      if (isMounted && supabaseData) {
-        setData(supabaseData);
+      if (isMounted) {
+        // Supabase как основной источник, localStorage как fallback
+        const sourceData = supabaseData ?? loadFromStorage() ?? createEmptyTree();
+        setData(sourceData);
         setModified(true);
+        setLoading(false);
       }
-      if (isMounted) setLoading(false);
     })();
 
     return () => {
@@ -222,14 +226,54 @@ export function useTreeData() {
     };
   }, []);
 
+  // ─── Realtime подписка на изменения ─────────────────────────
+  useEffect(() => {
+    if (loading) return;
+
+    const channel = supabase
+      .channel('tree-data-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'tree_data',
+        },
+        async (payload) => {
+          // При любом изменении перезагружаем данные из Supabase
+          console.log('Realtime update detected:', payload);
+          const freshData = await loadFromSupabase();
+          if (freshData) {
+            setData(freshData);
+            saveToStorage(freshData); // Обновляем localStorage
+            setModified(true);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loading]);
+
   // Debounced save on data change
   useEffect(() => {
     if (loading) return;
 
-    const timeoutId = setTimeout(() => {
-      saveToSupabase(data);
-      saveToStorage(data);
-      setModified(true);
+    const timeoutId = setTimeout(async () => {
+      setSyncStatus('syncing');
+      try {
+        await saveToSupabase(data);
+        saveToStorage(data);
+        setModified(true);
+        setSyncStatus('synced');
+      } catch (error) {
+        console.error('Sync error:', error);
+        setSyncStatus('error');
+        // Возвращаем статус synced через 3 секунды после ошибки
+        setTimeout(() => setSyncStatus('synced'), 3000);
+      }
     }, SAVE_DEBOUNCE_MS);
 
     return () => clearTimeout(timeoutId);
@@ -293,6 +337,7 @@ export function useTreeData() {
     data,
     modified,
     loading,
+    syncStatus,
     updateNode,
     updateCompany,
     replaceValues,
