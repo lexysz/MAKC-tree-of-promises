@@ -20,6 +20,16 @@ const SEARCH_BLUR_DELAY_MS = 150;
 const MAX_SEARCH_RESULTS = 15;
 const CORE_COLOR = "#8fb6c0";
 
+const DUST_PARTICLES = [
+  { left: "12%", top: "22%", size: 5, color: "rgba(67,214,181,0.35)", dur: "17s" },
+  { left: "82%", top: "18%", size: 4, color: "rgba(242,180,90,0.32)", dur: "14s" },
+  { left: "70%", top: "78%", size: 6, color: "rgba(111,180,242,0.28)", dur: "19s" },
+  { left: "22%", top: "72%", size: 4, color: "rgba(242,131,107,0.3)", dur: "15s" },
+  { left: "48%", top: "10%", size: 3, color: "rgba(155,211,86,0.32)", dur: "13s" },
+  { left: "90%", top: "56%", size: 5, color: "rgba(67,214,181,0.25)", dur: "21s" },
+  { left: "6%", top: "48%", size: 3, color: "rgba(242,180,90,0.26)", dur: "16s" },
+];
+
 type View = "tree" | "admin";
 
 // ─── Custom Hooks ────────────────────────────────────────────────
@@ -97,7 +107,7 @@ function useKeyboardShortcuts(view: View, canvasRef: React.RefObject<TreeCanvasH
   }, [view, canvasRef, onEscape]);
 }
 
-// ─── Icons ─────────────────────────────────────────────────────
+// ─── Icons ──────────────────────────────────────────────────────
 
 function LogoIcon() {
   return (
@@ -235,6 +245,28 @@ function BackgroundGradient() {
           "linear-gradient(160deg, #08151d 0%, #071219 55%, #0a1418 100%)",
       }}
     />
+  );
+}
+
+function DustParticles() {
+  return (
+    <>
+      {DUST_PARTICLES.map((d, i) => (
+        <span
+          key={i}
+          className="dust"
+          style={{
+            left: d.left,
+            top: d.top,
+            width: d.size,
+            height: d.size,
+            background: d.color,
+            boxShadow: `0 0 ${d.size * 3}px ${d.color}`,
+            ["--dur" as string]: d.dur,
+          }}
+        />
+      ))}
+    </>
   );
 }
 
@@ -558,6 +590,17 @@ export default function App() {
     return chain;
   }, [selectedNode, byId]);
 
+  /**
+   * Дополнительные корневые обещания, которым текущий support также является
+   * поддерживающим. Показываются в карточке как отдельный блок связей.
+   */
+  const extraParents = useMemo(() => {
+    if (!selectedNode?.extraParentIds) return [];
+    return selectedNode.extraParentIds
+      .map((id) => byId.get(id))
+      .filter((n): n is GraphNode => n !== undefined);
+  }, [selectedNode, byId]);
+
   const counts = useMemo(() => {
     const c = { value: 0, root: 0, support: 0, general: generalPromises.length };
     for (const n of graph.nodes) if (n.tier in c) c[n.tier as keyof typeof c] += 1;
@@ -721,6 +764,7 @@ export default function App() {
     return (
       <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
         <BackgroundGradient />
+        <DustParticles />
         <LoadingScreen message={checking ? "Проверка авторизации..." : "Загрузка данных из облака..."} />
       </div>
     );
@@ -730,6 +774,7 @@ export default function App() {
     return (
       <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
         <BackgroundGradient />
+        <DustParticles />
         {authed ? (
           <AdminPanel
             data={data}
@@ -752,6 +797,7 @@ export default function App() {
   return (
     <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
       <BackgroundGradient />
+      <DustParticles />
 
       <div className="absolute inset-0">
         <TreeCanvas
@@ -804,6 +850,7 @@ export default function App() {
         generalPromises={generalPromises}
         generalPromise={selectedGeneral}
         ancestors={ancestors}
+        extraParents={extraParents}
         onClose={clearSelection}
         onNavigate={navigate}
         onNavigateGeneral={navigateGeneral}
