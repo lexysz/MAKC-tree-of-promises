@@ -11,7 +11,7 @@ import { useTreeData } from "./state/useTreeData";
 import { supabase } from "./lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 
-// ─── Constants ───────────────────────────────────────────────────
+// ─── Constants ──────────────────────────────────────────────────
 
 const ZOOM_IN_FACTOR = 1.35;
 const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
@@ -537,7 +537,7 @@ function ZoomControls({ canvasRef }: { canvasRef: React.RefObject<TreeCanvasHand
 // ─── Main Component ──────────────────────────────────────────────
 
 export default function App() {
-  const { data, modified, loading, updateNode, updateCompany, replaceValues, reset, updateNodePosition, resetAllPositions } = useTreeData();
+  const { data, modified, loading, updateNode, updateCompany, replaceValues, forceSync, reset, updateNodePosition, resetAllPositions } = useTreeData();
   const { session, checking, authed } = useAuth();
   const [view, setView] = useState<View>("tree");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -547,6 +547,8 @@ export default function App() {
   // Запоминаем, была ли открыта панель фильтра до открытия карточки,
   // чтобы восстановить её после закрытия карточки
   const [panelStateBeforeCard, setPanelStateBeforeCard] = useState<boolean | null>(null);
+  // Флаг: после импорта Excel нужна немедленная синхронизация с Supabase
+  const [importSyncPending, setImportSyncPending] = useState(false);
   const canvasRef = useRef<TreeCanvasHandle>(null);
   // Пропускаем первую центровку: начальную анимацию делает сам TreeCanvas
   const firstCameraRun = useRef(true);
@@ -629,6 +631,14 @@ export default function App() {
       setSelectedGeneralId(null);
     }
   }, [generalPromises, selectedGeneralId]);
+
+  // Немедленная синхронизация после импорта: срабатывает ПОСЛЕ коммита нового
+  // состояния, поэтому forceSync получает уже обновлённый снимок данных.
+  useEffect(() => {
+    if (!importSyncPending) return;
+    setImportSyncPending(false);
+    void forceSync();
+  }, [importSyncPending, forceSync]);
 
   /** Скрывает панель фильтра при открытии карточки, запоминая её состояние */
   const hidePanelForCard = () => {
@@ -796,14 +806,13 @@ export default function App() {
             onLogout={async () => await supabase.auth.signOut()}
             onSave={updateNode}
             onUpdateCompany={updateCompany}
-            onApplyImport={async (r) => {
-            replaceValues(r.values, r.generalPromises);
-             // Принудительное сохранение сразу после импорта
-           await forceSync();
-                  }}
-          onReset={reset}
-   onResetAllPositions={resetAllPositions}
-/>
+            onApplyImport={(r) => {
+              replaceValues(r.values, r.generalPromises);
+              setImportSyncPending(true);
+            }}
+            onReset={reset}
+            onResetAllPositions={resetAllPositions}
+          />
         ) : (
           <AdminLogin onSuccess={() => {}} onBack={() => setView("tree")} />
         )}
