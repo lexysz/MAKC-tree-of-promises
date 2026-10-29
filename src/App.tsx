@@ -603,7 +603,20 @@ export default function App() {
 
   const counts = useMemo(() => {
     const c = { value: 0, root: 0, support: 0, general: generalPromises.length };
-    for (const n of graph.nodes) if (n.tier in c) c[n.tier as keyof typeof c] += 1;
+    // Поддерживающие с одинаковым названием (дубли в разных ценностях)
+    // считаем за одно обещание.
+    const supportTitles = new Set<string>();
+    for (const n of graph.nodes) {
+      if (n.tier === "value") c.value += 1;
+      else if (n.tier === "root") c.root += 1;
+      else if (n.tier === "support") {
+        const key = n.title.trim().toLowerCase();
+        if (!supportTitles.has(key)) {
+          supportTitles.add(key);
+          c.support += 1;
+        }
+      }
+    }
     return c;
   }, [graph, generalPromises]);
 
