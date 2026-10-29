@@ -56,6 +56,15 @@ function sanitizeTree(data: TreeData): TreeData {
         s.supports = depth < MAX_TREE_DEPTH
           ? sanitizeSupports(s.supports ?? [], depth + 1)
           : [];
+        // Нормализация extraParentIds: оставляем только валидные строки
+        if (Array.isArray(s.extraParentIds)) {
+          s.extraParentIds = s.extraParentIds.filter(
+            (id): id is string => typeof id === "string" && id.trim() !== ""
+          );
+          if (s.extraParentIds.length === 0) s.extraParentIds = undefined;
+        } else {
+          s.extraParentIds = undefined;
+        }
         return s;
       });
   };
@@ -104,6 +113,37 @@ function sanitizeTree(data: TreeData): TreeData {
   return data;
 }
 
+/**
+ * Удаляет из extraParentIds ссылки на несуществующие корневые обещания.
+ * Защищает от битых ссылок после удаления корневого или ручных правок данных.
+ */
+function pruneExtraParentIds(data: TreeData): TreeData {
+  const validRootIds = new Set<string>();
+  for (const value of data.values) {
+    for (const root of value.promises) {
+      validRootIds.add(root.id);
+    }
+  }
+
+  const prune = (supports: SupportDef[]) => {
+    for (const s of supports) {
+      if (s.extraParentIds) {
+        s.extraParentIds = s.extraParentIds.filter((id) => validRootIds.has(id));
+        if (s.extraParentIds.length === 0) s.extraParentIds = undefined;
+      }
+      if (s.supports) prune(s.supports);
+    }
+  };
+
+  for (const value of data.values) {
+    for (const root of value.promises) {
+      prune(root.supports ?? []);
+    }
+  }
+
+  return data;
+}
+
 /** Рекурсивно ищет узел поддержки по ID во всех уровнях вложенности. */
 function findSupportById(
   supports: SupportDef[] | undefined,
@@ -146,7 +186,7 @@ function loadFromStorage(): TreeData | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return reassignColors(sanitizeTree(JSON.parse(raw) as TreeData));
+    return pruneExtraParentIds(reassignColors(sanitizeTree(JSON.parse(raw) as TreeData)));
   } catch {
     return null;
   }
@@ -170,7 +210,9 @@ async function loadFromSupabase(): Promise<TreeData | null> {
       .single();
 
     if (error || !data) return null;
-    return reassignColors(sanitizeTree((data as { data: TreeData }).data));
+    return pruneExtraParentIds(
+      reassignColors(sanitizeTree((data as { data: TreeData }).data))
+    );
   } catch (error) {
     console.error("Error loading from Supabase:", error);
     return null;
@@ -240,12 +282,11 @@ export function useTreeData() {
           table: 'tree_data',
         },
         async (payload) => {
-          // При любом изменении перезагружаем данные из Supabase
           console.log('Realtime update detected:', payload);
           const freshData = await loadFromSupabase();
           if (freshData) {
             setData(freshData);
-            saveToStorage(freshData); // Обновляем localStorage
+            saveToStorage(freshData);
             setModified(true);
           }
         }
@@ -271,7 +312,6 @@ export function useTreeData() {
       } catch (error) {
         console.error('Sync error:', error);
         setSyncStatus('error');
-        // Возвращаем статус synced через 3 секунды после ошибки
         setTimeout(() => setSyncStatus('synced'), 3000);
       }
     }, SAVE_DEBOUNCE_MS);
