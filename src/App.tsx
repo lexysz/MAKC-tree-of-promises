@@ -796,10 +796,14 @@ export default function App() {
             onLogout={async () => await supabase.auth.signOut()}
             onSave={updateNode}
             onUpdateCompany={updateCompany}
-            onApplyImport={(r) => replaceValues(r.values, r.generalPromises)}
-            onReset={reset}
-            onResetAllPositions={resetAllPositions}
-          />
+            onApplyImport={async (r) => {
+            replaceValues(r.values, r.generalPromises);
+             // Принудительное сохранение сразу после импорта
+           await forceSync();
+                  }}
+          onReset={reset}
+   onResetAllPositions={resetAllPositions}
+/>
         ) : (
           <AdminLogin onSuccess={() => {}} onBack={() => setView("tree")} />
         )}
