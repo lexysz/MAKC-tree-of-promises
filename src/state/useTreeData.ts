@@ -114,30 +114,25 @@ function sanitizeTree(data: TreeData): TreeData {
 }
 
 /**
- * Удаляет из extraParentIds ссылки на несуществующие корневые обещания.
- * Защищает от битых ссылок после удаления корневого или ручных правок данных.
+ * Удаляет из extraParentIds ссылки на корни ДРУГИХ ценностей.
+ * Связь поддерживающего с несколькими корневыми допустима только
+ * в пределах одной ценности — иначе линии пересекают всё дерево.
  */
 function pruneExtraParentIds(data: TreeData): TreeData {
-  const validRootIds = new Set<string>();
-  for (const value of data.values) {
-    for (const root of value.promises) {
-      validRootIds.add(root.id);
-    }
-  }
-
-  const prune = (supports: SupportDef[]) => {
+  const prune = (supports: SupportDef[], validRootIds: Set<string>) => {
     for (const s of supports) {
       if (s.extraParentIds) {
         s.extraParentIds = s.extraParentIds.filter((id) => validRootIds.has(id));
         if (s.extraParentIds.length === 0) s.extraParentIds = undefined;
       }
-      if (s.supports) prune(s.supports);
+      if (s.supports) prune(s.supports, validRootIds);
     }
   };
 
   for (const value of data.values) {
+    const valueRootIds = new Set(value.promises.map((r) => r.id));
     for (const root of value.promises) {
-      prune(root.supports ?? []);
+      prune(root.supports ?? [], valueRootIds);
     }
   }
 
@@ -240,7 +235,7 @@ async function saveToSupabase(data: TreeData): Promise<void> {
   }
 }
 
-// ─── Hook ────────────────────────────────────────────────────────
+// ─── Hook ───────────────────────────────────────────────────────
 
 export function useTreeData() {
   const [data, setData] = useState<TreeData>(createEmptyTree());
