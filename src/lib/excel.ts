@@ -214,7 +214,6 @@ function detectGeneralHeader(rows: unknown[][]): GeneralHeaderDetection | null {
       if (rule) map[rule.key] = idx;
     });
 
-    // Лист считается таблицей общих обещаний, если есть колонка с заголовком
     if (map.title !== undefined) {
       return { headerIdx: i, columnMap: map };
     }
@@ -253,7 +252,6 @@ function detectChainHeader(rows: unknown[][]): ChainHeaderDetection | null {
       if (rule) map[rule.key] = idx;
     });
 
-    // Лист считается таблицей цепочек, если есть колонки parent и child
     if (map.parent !== undefined && map.child !== undefined) {
       return { headerIdx: i, columnMap: map };
     }
@@ -384,15 +382,33 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
     }
 
     if (supportTitle) {
-      root.supports.push({
-        id: `s-${slugify(supportTitle)}-${root.supports.length}`,
-        title: supportTitle,
-        description: `Поддерживающее: ${supportTitle}`,
-        who: whoSupport || undefined,
-        toWhom: toWhomSupport || undefined,
-        metrics: supportMetrics || undefined,
-      });
-      stats.supports++;
+      // Проверяем, существует ли уже support с таким названием где-то в дереве.
+      // Если да — не создаём дубль, а связываем с текущим корневым через extraParentIds.
+      let existingSupport: SupportDef | null = null;
+      for (const v of valuesMap.values()) {
+        existingSupport = findSupportByTitle(v.promises, supportTitle);
+        if (existingSupport) break;
+      }
+
+      if (existingSupport) {
+        if (!existingSupport.extraParentIds) existingSupport.extraParentIds = [];
+        if (!existingSupport.extraParentIds.includes(root.id)) {
+          existingSupport.extraParentIds.push(root.id);
+          warnings.push(
+            `Строка ${i + 1}: поддерживающее "${supportTitle}" связано также с корневым "${rootTitle}"`,
+          );
+        }
+      } else {
+        root.supports.push({
+          id: `s-${slugify(supportTitle)}-${root.supports.length}`,
+          title: supportTitle,
+          description: `Поддерживающее: ${supportTitle}`,
+          who: whoSupport || undefined,
+          toWhom: toWhomSupport || undefined,
+          metrics: supportMetrics || undefined,
+        });
+        stats.supports++;
+      }
     }
   }
 
@@ -459,7 +475,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   // ─── Цепочки поддерживающих обещаний: ищем третий лист ───
 
   let chainSheetName: string | null =
-    workbook.SheetNames.find((n) => n.toLowerCase().includes("цепочк") || n.toLowerCase().includes("поддерж") && !n.toLowerCase().includes("общ")) ?? null;
+    workbook.SheetNames.find((n) => n.toLowerCase().includes("цепочк") || (n.toLowerCase().includes("поддерж") && !n.toLowerCase().includes("общ"))) ?? null;
   let chainHeader: ChainHeaderDetection | null = chainSheetName
     ? detectChainHeader(readRows(workbook, chainSheetName))
     : null;
@@ -501,7 +517,6 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         continue;
       }
 
-      // Ищем родительское поддерживающее обещание во всех корневых
       let parentSupport: SupportDef | null = null;
       for (const value of valuesMap.values()) {
         parentSupport = findSupportByTitle(value.promises, parentTitle);
@@ -515,7 +530,6 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         continue;
       }
 
-      // Проверяем, что родительское обещание не имеет своих дочерних (ограничение глубины)
       if (parentSupport.supports && parentSupport.supports.length > 0) {
         warnings.push(
           `Лист "${chainSheetName}", строка ${i + 1}: у "${parentTitle}" уже есть дочерние обещания (максимум 4 уровня дерева)`,
@@ -523,7 +537,6 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         continue;
       }
 
-      // Проверяем дубликаты
       if (parentSupport.supports?.some((s) => s.title === childTitle)) {
         warnings.push(
           `Лист "${chainSheetName}", строка ${i + 1}: дочернее обещание "${childTitle}" уже есть у "${parentTitle}"`,
@@ -531,7 +544,6 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         continue;
       }
 
-      // Добавляем дочернее поддерживающее обещание
       if (!parentSupport.supports) {
         parentSupport.supports = [];
       }
