@@ -77,12 +77,22 @@ function CrumbSeparatorIcon() {
 // ─── Sub-Components ──────────────────────────────────────────────
 
 function MetaRow({ label, value, color }: { label: string; value: string; color: string }) {
+  const lines = value.split("\n").map((s) => s.trim()).filter(Boolean);
+
   return (
     <div className="flex items-start gap-3">
       <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color, boxShadow: `0 0 6px ${color}77` }} />
       <div className="min-w-0">
         <dt className="text-[9.5px] font-bold uppercase tracking-[0.16em] text-mist-500">{label}</dt>
-        <dd className="mt-0.5 text-[13px] leading-snug font-medium text-mist-100">{value}</dd>
+        {lines.length > 1 ? (
+          <ul className="mt-0.5 list-disc space-y-1 pl-4 text-[13px] leading-snug font-medium text-mist-100">
+            {lines.map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+        ) : (
+          <dd className="mt-0.5 text-[13px] leading-snug font-medium text-mist-100">{lines[0] ?? value}</dd>
+        )}
       </div>
     </div>
   );
