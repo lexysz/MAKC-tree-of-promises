@@ -345,6 +345,16 @@ export function useTreeData() {
     });
   }, []);
 
+  /** Редактирует общее (клиентократическое) обещание компании. */
+  const updateGeneralPromise = useCallback((id: string, patch: NodePatch) => {
+    setData((prev) => {
+      const next = cloneTree(prev);
+      const gp = (next.generalPromises ?? []).find((p) => p.id === id);
+      if (gp) applyPatch(gp, patch);
+      return next;
+    });
+  }, []);
+
   const replaceValues = useCallback(
     (values: ValueDef[], generalPromises: GeneralPromiseDef[] = []) => {
       setData((prev) => {
@@ -417,6 +427,7 @@ export function useTreeData() {
     syncStatus,
     updateNode,
     updateCompany,
+    updateGeneralPromise,
     replaceValues,
     forceSync,
     reset,
