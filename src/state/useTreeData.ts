@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createEmptyTree, getValueColor, MAX_TREE_DEPTH } from "../data/tree";
 import type { CompanyDef, TreeData, ValueDef, GeneralPromiseDef, SupportDef } from "../data/tree";
 import { supabase } from "../lib/supabase";
 
 const STORAGE_KEY = "promise-tree-data-v8";
 const SAVE_DEBOUNCE_MS = 500;
+/** Окно (мс), в течение которого Realtime игнорирует собственные изменения */
+const OWN_UPDATE_WINDOW_MS = 3000;
 
 export type SyncStatus = 'synced' | 'syncing' | 'error';
 
@@ -235,13 +237,17 @@ async function saveToSupabase(data: TreeData): Promise<void> {
   }
 }
 
-// ─── Hook ───────────────────────────────────────────────────────
+// ─── Hook ────────────────────────────────────────────────────────
 
 export function useTreeData() {
   const [data, setData] = useState<TreeData>(createEmptyTree());
   const [modified, setModified] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
+
+  // Отметка времени последнего локального сохранения в Supabase.
+  // Используется в Realtime-подписке, чтобы игнорировать эхо собственных изменений.
+  const lastLocalSaveRef = useRef<number>(0);
 
   // Initial load from Supabase (primary source)
   useEffect(() => {
@@ -277,6 +283,13 @@ export function useTreeData() {
           table: 'tree_data',
         },
         async (payload) => {
+          // Игнорируем эхо собственных изменений в пределах окна
+          const elapsed = Date.now() - lastLocalSaveRef.current;
+          if (elapsed < OWN_UPDATE_WINDOW_MS) {
+            console.log('Realtime: ignoring own change (elapsed', elapsed, 'ms)');
+            return;
+          }
+
           console.log('Realtime update detected:', payload);
           const freshData = await loadFromSupabase();
           if (freshData) {
@@ -302,6 +315,7 @@ export function useTreeData() {
       try {
         await saveToSupabase(data);
         saveToStorage(data);
+        lastLocalSaveRef.current = Date.now();
         setModified(true);
         setSyncStatus('synced');
       } catch (error) {
@@ -333,17 +347,45 @@ export function useTreeData() {
 
   const replaceValues = useCallback(
     (values: ValueDef[], generalPromises: GeneralPromiseDef[] = []) => {
-      setData((prev) => ({
-        ...prev,
-        values: (Array.isArray(values) ? values : []).map((v, i) => ({
-          ...v,
-          color: getValueColor(i),
-        })),
-        generalPromises: Array.isArray(generalPromises) ? generalPromises : [],
-      }));
+      setData((prev) => {
+        const next: TreeData = {
+          ...prev,
+          values: (Array.isArray(values) ? values : []).map((v, i) => ({
+            ...v,
+            color: getValueColor(i),
+          })),
+          generalPromises: Array.isArray(generalPromises) ? generalPromises : [],
+        };
+        // Немедленно сохраняем в localStorage как резервную копию.
+        // Supabase запишется через debounce или forceSync.
+        saveToStorage(next);
+        return next;
+      });
     },
     [],
   );
+
+  /**
+   * Принудительная немедленная синхронизация (без debounce).
+   * Используется, когда нельзя ждать SAVE_DEBOUNCE_MS, например,
+   * сразу после импорта Excel — чтобы данные гарантированно попали в Supabase.
+   */
+  const forceSync = useCallback(async () => {
+    setSyncStatus('syncing');
+    try {
+      await saveToSupabase(data);
+      saveToStorage(data);
+      lastLocalSaveRef.current = Date.now();
+      setModified(true);
+      setSyncStatus('synced');
+      console.log('Force sync completed');
+    } catch (error) {
+      console.error('Force sync error:', error);
+      setSyncStatus('error');
+      setTimeout(() => setSyncStatus('synced'), 3000);
+      throw error;
+    }
+  }, [data]);
 
   const updateNodePosition = useCallback((id: string, x: number, y: number) => {
     setData((prev) => {
@@ -376,6 +418,7 @@ export function useTreeData() {
     updateNode,
     updateCompany,
     replaceValues,
+    forceSync,
     reset,
     updateNodePosition,
     resetAllPositions,
