@@ -126,6 +126,17 @@ function cellStr(v: unknown): string {
   return String(v).replace(/\r?\n/g, " ").trim();
 }
 
+/**
+ * Дописывает метрику в список: метрики хранятся одной строкой через перенос.
+ * Дубликаты игнорируются.
+ */
+function appendMetric(existing: string | undefined, add: string): string {
+  const parts = (existing ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+  if (parts.includes(add)) return existing ?? add;
+  parts.push(add);
+  return parts.join("\n");
+}
+
 function normHeader(s: string): string {
   return s.toLowerCase().replace(/[^a-zа-яё0-9]/g, "");
 }
@@ -148,15 +159,13 @@ type FieldKey =
   | "supportMetrics";
 
 const HEADER_RULES: Array<{ key: FieldKey; test: (h: string) => boolean }> = [
-  { key: "support", test: (h) => h.includes("поддерж") && !h.includes("кто") && !h.includes("кому") },
-  { key: "root", test: (h) => h.includes("корнев") },
+  { key: "support", test: (h) => h.includes("поддерж") && !h.includes("кто") && !h.includes("кому") && !h.includes("метри") },
+  { key: "root", test: (h) => h.includes("корнев") && !h.includes("метри") },
   { key: "whoSupport", test: (h) => h.includes("кто") && h.includes("дает") && !h.includes("команд") },
   { key: "toWhomSupport", test: (h) => h.includes("кому") && !h.includes("клиент") },
-  { key: "supportMetrics", test: (h) => h.includes("метри") && !h.includes("корнев") },
   { key: "whoRoot", test: (h) => h.includes("кто") && (h.includes("команд") || h.includes("дает")) },
   { key: "toWhomRoot", test: (h) => h.includes("кому") && (h.includes("клиент") || h.includes("рол")) },
   { key: "value", test: (h) => h.includes("ценност") },
-  { key: "rootMetrics", test: (h) => h.includes("метри") },
 ];
 
 interface HeaderDetection {
@@ -175,6 +184,38 @@ function detectMainHeader(rows: unknown[][]): HeaderDetection | null {
       if (!h) return;
       const rule = HEADER_RULES.find((r) => !(r.key in map) && r.test(h));
       if (rule) map[rule.key] = idx;
+    });
+
+    // Колонки метрик разбираем отдельно: заголовки могут совпадать («Метрики»).
+    // Явная привязка по словам «корнев»/«поддерж», иначе — по позиции
+    // относительно колонки поддерживающего обещания.
+    const supportIdx = map.support;
+    row.forEach((cell, idx) => {
+      const h = normHeader(cellStr(cell));
+      if (!h || !h.includes("метри")) return;
+
+      if (h.includes("корнев")) {
+        if (!("rootMetrics" in map)) map.rootMetrics = idx;
+        return;
+      }
+      if (h.includes("поддерж")) {
+        if (!("supportMetrics" in map)) map.supportMetrics = idx;
+        return;
+      }
+
+      // Просто «Метрики»: до колонки поддерживающего — метрики корневого,
+      // после — метрики поддерживающего.
+      if (supportIdx !== undefined) {
+        if (idx < supportIdx) {
+          if (!("rootMetrics" in map)) map.rootMetrics = idx;
+        } else if (idx > supportIdx) {
+          if (!("supportMetrics" in map)) map.supportMetrics = idx;
+        }
+      } else if (!("rootMetrics" in map)) {
+        map.rootMetrics = idx;
+      } else if (!("supportMetrics" in map)) {
+        map.supportMetrics = idx;
+      }
     });
 
     if (Object.keys(map).length >= 3) {
@@ -271,6 +312,10 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   const valuesMap = new Map<string, ValueDef>();
   const rootsMap = new Map<string, RootDef>();
   const rootToValue = new Map<string, string>();
+  // Домашний корень каждого поддерживающего (для отличия продолжения строки от связи)
+  const supportHome = new Map<string, string>();
+  // Последнее поддерживающее текущего корневого (для строк-продолжений с метриками)
+  const lastSupportByRoot = new Map<string, SupportDef>();
   const stats = { rows: 0, values: 0, roots: 0, supports: 0, general: 0, chains: 0 };
 
   const headerDetection = detectMainHeader(rows);
@@ -280,7 +325,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   const { headerIdx, columnMap } = headerDetection;
 
   // Наследование значений для объединённых ячеек
-  const carry = { whoRoot: "", toWhomRoot: "", value: "", root: "", rootMetrics: "" };
+  const carry = { whoRoot: "", toWhomRoot: "", value: "", root: "" };
 
   for (let i = headerIdx + 1; i < rows.length; i++) {
     const row = rows[i];
@@ -296,18 +341,17 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
     const toWhomRoot = get("toWhomRoot") || carry.toWhomRoot;
     const valueName = get("value") || carry.value;
     const rootTitle = get("root") || carry.root;
-    const rootMetrics = get("rootMetrics") || carry.rootMetrics;
 
     const supportTitle = get("support");
     const whoSupport = get("whoSupport");
     const toWhomSupport = get("toWhomSupport");
-    const supportMetrics = get("supportMetrics");
+    const rawRootMetrics = get("rootMetrics");
+    const rawSupportMetrics = get("supportMetrics");
 
     if (get("whoRoot")) carry.whoRoot = whoRoot;
     if (get("toWhomRoot")) carry.toWhomRoot = toWhomRoot;
     if (get("value")) carry.value = valueName;
     if (get("root")) carry.root = rootTitle;
-    if (get("rootMetrics")) carry.rootMetrics = rootMetrics;
 
     if (!valueName && !rootTitle && !supportTitle) continue;
 
@@ -346,7 +390,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         description: `Обещание: ${rootTitle}`,
         who: whoRoot || undefined,
         toWhom: toWhomRoot || undefined,
-        metrics: rootMetrics || undefined,
+        metrics: undefined,
         supports: [],
       };
       rootsMap.set(rootTitle, root);
@@ -381,30 +425,55 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
       }
     }
 
+    // Метрики корневого: могут приходить несколькими строками — накапливаем списком
+    if (rawRootMetrics) {
+      root.metrics = appendMetric(root.metrics, rawRootMetrics);
+    }
+
+    // Поддерживающее обещание: ищем только в пределах текущей ценности
+    let currentSupport: SupportDef | null = null;
+
     if (supportTitle) {
-      // Ищем support с таким названием ТОЛЬКО в пределах текущей ценности:
-      // общая связь нескольких корней допустима внутри одной ценности,
-      // иначе линии связи пересекали бы всё дерево.
       const existingSupport = findSupportByTitle(value.promises, supportTitle);
 
       if (existingSupport) {
-        if (!existingSupport.extraParentIds) existingSupport.extraParentIds = [];
-        if (!existingSupport.extraParentIds.includes(root.id)) {
+        currentSupport = existingSupport;
+        const homeRootId = supportHome.get(existingSupport.id);
+        // Повтор того же названия под ДРУГИМ корневым той же ценности — доп. связь.
+        // Повтор под тем же корневым — строка-продолжение (например, вторая метрика).
+        if (homeRootId !== root.id && !existingSupport.extraParentIds?.includes(root.id)) {
+          if (!existingSupport.extraParentIds) existingSupport.extraParentIds = [];
           existingSupport.extraParentIds.push(root.id);
           warnings.push(
             `Строка ${i + 1}: поддерживающее "${supportTitle}" связано также с корневым "${rootTitle}" (в пределах ценности "${valueName}")`,
           );
         }
       } else {
-        root.supports.push({
+        currentSupport = {
           id: `s-${slugify(supportTitle)}-${root.supports.length}`,
           title: supportTitle,
           description: `Поддерживающее: ${supportTitle}`,
           who: whoSupport || undefined,
           toWhom: toWhomSupport || undefined,
-          metrics: supportMetrics || undefined,
-        });
+          metrics: undefined,
+        };
+        root.supports.push(currentSupport);
+        supportHome.set(currentSupport.id, root.id);
         stats.supports++;
+      }
+    } else {
+      // Ячейка поддерживающего пуста (слитые ячейки): строка-продолжение
+      // последнего поддерживающего текущего корневого.
+      currentSupport = lastSupportByRoot.get(root.id) ?? null;
+    }
+
+    if (currentSupport) {
+      lastSupportByRoot.set(root.id, currentSupport);
+      if (whoSupport && !currentSupport.who) currentSupport.who = whoSupport;
+      if (toWhomSupport && !currentSupport.toWhom) currentSupport.toWhom = toWhomSupport;
+      // Метрики поддерживающего: накапливаем списком
+      if (rawSupportMetrics) {
+        currentSupport.metrics = appendMetric(currentSupport.metrics, rawSupportMetrics);
       }
     }
   }
