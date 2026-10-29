@@ -1,570 +1,470 @@
-import * as XLSX from "xlsx";
-import { getValueColor, findSupportByTitle } from "../data/tree";
-import type { GeneralPromiseDef, RootDef, ValueDef, SupportDef } from "../data/tree";
+import type { CompanyDef, Tier, ValueDef, SupportDef } from "../data/tree";
 
-export interface ImportResult {
-  values: ValueDef[];
-  generalPromises: GeneralPromiseDef[];
-  warnings: string[];
-  stats: {
-    rows: number;
-    values: number;
-    roots: number;
-    supports: number;
-    general: number;
-    chains: number;
-  };
+export interface GraphNode {
+  id: string;
+  tier: Tier;
+  title: string;
+  short: string;
+  description: string;
+  parentId: string | null;
+  familyId: string;
+  familyTitle: string;
+  color: string;
+  x: number;
+  y: number;
+  r: number;
+  delay: number;
+  childrenIds: string[];
+  who?: string;
+  toWhom?: string;
+  metrics?: string;
+  /** id дополнительных корневых обещаний, которым этот support также является поддерживающим */
+  extraParentIds?: string[];
 }
 
-export const TEMPLATE_HEADERS = [
-  "Кто дает обещание (команда)",
-  "Кому (клиент, команда, роль)",
-  "ЦЕННОСТЬ",
-  "Корневое обещание",
-  "Метрики",
-  "Поддерживающее обещание",
-  "Кто дает",
-  "Кому",
-  "Метрики",
-];
-
-export const GENERAL_TEMPLATE_HEADERS = [
-  "Общее обещание",
-  "Описание",
-  "Кто дает",
-  "Кому",
-  "Метрики",
-];
-
-export const CHAIN_TEMPLATE_HEADERS = [
-  "Родительское поддерживающее обещание",
-  "Дочернее поддерживающее обещание",
-  "Описание",
-  "Кто дает",
-  "Кому",
-  "Метрики",
-];
-
-export function downloadTemplate() {
-  const sampleData = [
-    [
-      "Команда продукта",
-      "Клиенты B2B",
-      "Надёжность",
-      "Стабильность важнее новых функций",
-      "Аптайм ≥ 99.9%",
-      "Ежемесячный отчёт о стабильности",
-      "Команда продукта",
-      "Клиенты",
-      "Отчёт до 5 числа",
-    ],
-    ["", "", "", "", "", "Резервные копии каждые 6 часов", "Инфраструктура", "Клиенты", "RPO ≤ 6ч"],
-    [
-      "Аккаунт-команда",
-      "Действующие клиенты",
-      "Скорость",
-      "Ответ клиенту — в течение рабочего дня",
-      "Первый ответ ≤ 2 часов",
-      "",
-      "",
-      "",
-      "",
-    ],
-  ];
-
-  const generalSampleData = [
-    [
-      "Выплата за 24 часа после подачи документов",
-      "Гарантированный срок выплаты по любому страховому случаю",
-      "Урегулирование, Финансы",
-      "Все клиенты",
-      "95% выплат в течение 24 часов",
-    ],
-  ];
-
-  const chainSampleData = [
-    [
-      "Ежемесячный отчёт о стабильности",
-      "Автоматическая генерация отчёта",
-      "Скрипт собирает метрики из всех систем и формирует PDF",
-      "DevOps",
-      "Команда продукта",
-      "Время генерации < 5 минут",
-    ],
-  ];
-
-  const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_HEADERS, ...sampleData]);
-  XLSX.utils.book_append_sheet(wb, ws, "Обещания");
-  const wsGeneral = XLSX.utils.aoa_to_sheet([GENERAL_TEMPLATE_HEADERS, ...generalSampleData]);
-  XLSX.utils.book_append_sheet(wb, wsGeneral, "Общие обещания");
-  const wsChains = XLSX.utils.aoa_to_sheet([CHAIN_TEMPLATE_HEADERS, ...chainSampleData]);
-  XLSX.utils.book_append_sheet(wb, wsChains, "Поддерживающие (цепочки)");
-  XLSX.writeFile(wb, "шаблон_обещаний.xlsx");
+export interface GraphEdge {
+  id: string;
+  from: string;
+  to: string;
+  color: string;
+  d: string;
+  delay: number;
 }
 
-// ─── Вспомогательные функции ─────────────────────────────────────
+export interface GraphBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
 
-function slugify(text: string): string {
-  const cyrillicMap: Record<string, string> = {
-    а: "a", б: "b", в: "v", г: "g", д: "d", е: "e", ё: "e", ж: "zh",
-    з: "z", и: "i", й: "y", л: "l", м: "m", н: "n", о: "o", п: "p",
-    р: "r", с: "s", т: "t", у: "u", ф: "f", х: "h", ц: "ts", ч: "ch",
-    ш: "sh", щ: "sch", ъ: "", ы: "y", ь: "", э: "e", ю: "yu", я: "ya",
+export const NODE_R: Record<Tier, number> = {
+  company: 400,
+  value: 324,
+  root: 120,
+  support: 60,
+};
+
+const CORE_COLOR = "#8fb6c0";
+const NODE_GAP = 100;
+
+function minRingRadius(n: number, r: number): number {
+  if (n <= 1) return r + 60;
+  return (n * (2 * r + NODE_GAP)) / (2 * Math.PI);
+}
+
+function trimmed(
+  x1: number,
+  y1: number,
+  r1: number,
+  x2: number,
+  y2: number,
+  r2: number,
+): [number, number, number, number] {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const d = Math.hypot(dx, dy) || 1;
+  const ux = dx / d;
+  const uy = dy / d;
+
+  return [
+    x1 + ux * (r1 + 4),
+    y1 + uy * (r1 + 4),
+    x2 - ux * (r2 + 6),
+    y2 - uy * (r2 + 6),
+  ];
+}
+
+/**
+ * Подсчитывает общее количество поддерживающих обещаний всех уровней вложенности.
+ */
+function countAllSupports(values: ValueDef[]): number {
+  const countSupport = (supports: SupportDef[]): number => {
+    return supports.reduce((sum, s) => sum + 1 + countSupport(s.supports ?? []), 0);
   };
 
-  return text
-    .toLowerCase()
-    .replace(/[а-яё]/g, (char) => cyrillicMap[char] || char)
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 30);
+  return values.reduce((sum, v) => {
+    return sum + v.promises.reduce((sum2, r) => sum2 + countSupport(r.supports ?? []), 0);
+  }, 0);
 }
 
-function cellStr(v: unknown): string {
-  if (v === null || v === undefined) return "";
-  return String(v).replace(/\r?\n/g, " ").trim();
-}
+export function buildGraph(
+  company: CompanyDef,
+  values: ValueDef[],
+  customPositions?: Record<string, { x: number; y: number }>,
+): {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  bounds: GraphBounds;
+} {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  const nodeIds = new Set<string>();
 
-function normHeader(s: string): string {
-  return s.toLowerCase().replace(/[^a-zа-яё0-9]/g, "");
-}
+  const totalRoots = values.reduce((sum, v) => sum + v.promises.length, 0);
+  const totalSupports = countAllSupports(values);
 
-function readRows(workbook: XLSX.WorkBook, sheetName: string): unknown[][] {
-  return XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1 });
-}
+  const scaleFactor = Math.max(1, Math.sqrt(values.length + totalRoots + totalSupports) / 5);
+  const valueRingR = Math.max(1050, minRingRadius(values.length, NODE_R.value));
+  const rootRingR = Math.max(valueRingR + 900 * scaleFactor, minRingRadius(totalRoots, NODE_R.root));
+  const supportRingR = Math.max(rootRingR + 840 * scaleFactor, minRingRadius(totalSupports, NODE_R.support));
+  const support2RingR = supportRingR + 600 * scaleFactor;
 
-// ─── Распознавание основного листа ───────────────────────────────
-
-type FieldKey =
-  | "whoRoot"
-  | "toWhomRoot"
-  | "value"
-  | "root"
-  | "rootMetrics"
-  | "support"
-  | "whoSupport"
-  | "toWhomSupport"
-  | "supportMetrics";
-
-const HEADER_RULES: Array<{ key: FieldKey; test: (h: string) => boolean }> = [
-  { key: "support", test: (h) => h.includes("поддерж") && !h.includes("кто") && !h.includes("кому") },
-  { key: "root", test: (h) => h.includes("корнев") },
-  { key: "whoSupport", test: (h) => h.includes("кто") && h.includes("дает") && !h.includes("команд") },
-  { key: "toWhomSupport", test: (h) => h.includes("кому") && !h.includes("клиент") },
-  { key: "supportMetrics", test: (h) => h.includes("метри") && !h.includes("корнев") },
-  { key: "whoRoot", test: (h) => h.includes("кто") && (h.includes("команд") || h.includes("дает")) },
-  { key: "toWhomRoot", test: (h) => h.includes("кому") && (h.includes("клиент") || h.includes("рол")) },
-  { key: "value", test: (h) => h.includes("ценност") },
-  { key: "rootMetrics", test: (h) => h.includes("метри") },
-];
-
-interface HeaderDetection {
-  headerIdx: number;
-  columnMap: Record<string, number>;
-}
-
-function detectMainHeader(rows: unknown[][]): HeaderDetection | null {
-  for (let i = 0; i < Math.min(rows.length, 10); i++) {
-    const row = rows[i];
-    if (!row) continue;
-
-    const map: Record<string, number> = {};
-    row.forEach((cell, idx) => {
-      const h = normHeader(cellStr(cell));
-      if (!h) return;
-      const rule = HEADER_RULES.find((r) => !(r.key in map) && r.test(h));
-      if (rule) map[rule.key] = idx;
+  if (!nodeIds.has(company.id)) {
+    nodeIds.add(company.id);
+    nodes.push({
+      id: company.id,
+      tier: "company",
+      title: company.title,
+      short: company.short,
+      description: company.description,
+      parentId: null,
+      familyId: "core",
+      familyTitle: company.title,
+      color: CORE_COLOR,
+      x: 0,
+      y: 0,
+      r: NODE_R.company,
+      delay: 0.05,
+      childrenIds: values.map((v) => v.id),
     });
-
-    if (Object.keys(map).length >= 3) {
-      return { headerIdx: i, columnMap: map };
-    }
   }
-  return null;
-}
 
-// ─── Распознавание листа общих обещаний ──────────────────────────
+  const valueAngleStep = (2 * Math.PI) / values.length;
 
-type GeneralFieldKey = "title" | "description" | "who" | "toWhom" | "metrics";
+  values.forEach((value, i) => {
+    const valueAngle = -Math.PI / 2 + valueAngleStep * i;
+    const vx = Math.cos(valueAngle) * valueRingR;
+    const vy = Math.sin(valueAngle) * valueRingR;
 
-const GENERAL_HEADER_RULES: Array<{ key: GeneralFieldKey; test: (h: string) => boolean }> = [
-  { key: "title", test: (h) => h.includes("общ") },
-  { key: "description", test: (h) => h.includes("описан") },
-  { key: "who", test: (h) => h.includes("кто") },
-  { key: "toWhom", test: (h) => h.includes("кому") },
-  { key: "metrics", test: (h) => h.includes("метри") },
-];
-
-interface GeneralHeaderDetection {
-  headerIdx: number;
-  columnMap: Partial<Record<GeneralFieldKey, number>>;
-}
-
-function detectGeneralHeader(rows: unknown[][]): GeneralHeaderDetection | null {
-  for (let i = 0; i < Math.min(rows.length, 10); i++) {
-    const row = rows[i];
-    if (!row) continue;
-
-    const map: Partial<Record<GeneralFieldKey, number>> = {};
-    row.forEach((cell, idx) => {
-      const h = normHeader(cellStr(cell));
-      if (!h) return;
-      const rule = GENERAL_HEADER_RULES.find((r) => !(r.key in map) && r.test(h));
-      if (rule) map[rule.key] = idx;
-    });
-
-    if (map.title !== undefined) {
-      return { headerIdx: i, columnMap: map };
-    }
-  }
-  return null;
-}
-
-// ─── Распознавание листа цепочек поддерживающих обещаний ─────────
-
-type ChainFieldKey = "parent" | "child" | "description" | "who" | "toWhom" | "metrics";
-
-const CHAIN_HEADER_RULES: Array<{ key: ChainFieldKey; test: (h: string) => boolean }> = [
-  { key: "parent", test: (h) => h.includes("родит") },
-  { key: "child", test: (h) => h.includes("дочерн") || h.includes("поддерж") },
-  { key: "description", test: (h) => h.includes("описан") },
-  { key: "who", test: (h) => h.includes("кто") },
-  { key: "toWhom", test: (h) => h.includes("кому") },
-  { key: "metrics", test: (h) => h.includes("метри") },
-];
-
-interface ChainHeaderDetection {
-  headerIdx: number;
-  columnMap: Partial<Record<ChainFieldKey, number>>;
-}
-
-function detectChainHeader(rows: unknown[][]): ChainHeaderDetection | null {
-  for (let i = 0; i < Math.min(rows.length, 10); i++) {
-    const row = rows[i];
-    if (!row) continue;
-
-    const map: Partial<Record<ChainFieldKey, number>> = {};
-    row.forEach((cell, idx) => {
-      const h = normHeader(cellStr(cell));
-      if (!h) return;
-      const rule = CHAIN_HEADER_RULES.find((r) => !(r.key in map) && r.test(h));
-      if (rule) map[rule.key] = idx;
-    });
-
-    if (map.parent !== undefined && map.child !== undefined) {
-      return { headerIdx: i, columnMap: map };
-    }
-  }
-  return null;
-}
-
-// ─── Основной парсинг ────────────────────────────────────────────
-
-export async function parseWorkbook(file: File): Promise<ImportResult> {
-  const data = await file.arrayBuffer();
-  const workbook = XLSX.read(data, { type: "array" });
-  const sheetName = workbook.SheetNames[0];
-  const rows = readRows(workbook, sheetName);
-
-  const warnings: string[] = [];
-  const valuesMap = new Map<string, ValueDef>();
-  const rootsMap = new Map<string, RootDef>();
-  const rootToValue = new Map<string, string>();
-  const stats = { rows: 0, values: 0, roots: 0, supports: 0, general: 0, chains: 0 };
-
-  const headerDetection = detectMainHeader(rows);
-  if (!headerDetection) {
-    throw new Error("Не найдена строка заголовков. Проверьте названия колонок.");
-  }
-  const { headerIdx, columnMap } = headerDetection;
-
-  // Наследование значений для объединённых ячеек
-  const carry = { whoRoot: "", toWhomRoot: "", value: "", root: "", rootMetrics: "" };
-
-  for (let i = headerIdx + 1; i < rows.length; i++) {
-    const row = rows[i];
-    if (!row || row.length === 0) continue;
-    stats.rows++;
-
-    const get = (key: FieldKey): string => {
-      const idx = columnMap[key];
-      return idx !== undefined ? cellStr(row[idx]) : "";
-    };
-
-    const whoRoot = get("whoRoot") || carry.whoRoot;
-    const toWhomRoot = get("toWhomRoot") || carry.toWhomRoot;
-    const valueName = get("value") || carry.value;
-    const rootTitle = get("root") || carry.root;
-    const rootMetrics = get("rootMetrics") || carry.rootMetrics;
-
-    const supportTitle = get("support");
-    const whoSupport = get("whoSupport");
-    const toWhomSupport = get("toWhomSupport");
-    const supportMetrics = get("supportMetrics");
-
-    if (get("whoRoot")) carry.whoRoot = whoRoot;
-    if (get("toWhomRoot")) carry.toWhomRoot = toWhomRoot;
-    if (get("value")) carry.value = valueName;
-    if (get("root")) carry.root = rootTitle;
-    if (get("rootMetrics")) carry.rootMetrics = rootMetrics;
-
-    if (!valueName && !rootTitle && !supportTitle) continue;
-
-    if (!valueName) {
-      warnings.push(`Строка ${i + 1}: отсутствует ценность`);
-      continue;
+    if (!nodeIds.has(value.id)) {
+      nodeIds.add(value.id);
+      nodes.push({
+        id: value.id,
+        tier: "value",
+        title: value.title,
+        short: value.short,
+        description: value.description,
+        parentId: company.id,
+        familyId: value.id,
+        familyTitle: value.title,
+        color: value.color,
+        x: vx,
+        y: vy,
+        r: NODE_R.value,
+        delay: 0.18 + i * 0.07,
+        childrenIds: value.promises.map((p) => p.id),
+      });
     }
 
-    let value = valuesMap.get(valueName);
-    if (!value) {
-      value = {
-        id: `v-${slugify(valueName)}`,
-        title: valueName,
-        short: valueName,
-        description: `Ценность: ${valueName}`,
-        color: getValueColor(valuesMap.size),
-        promises: [],
-      };
-      valuesMap.set(valueName, value);
-      stats.values++;
-    }
+    const rootCount = value.promises.length;
+    if (rootCount === 0) return;
 
-    if (!rootTitle) {
-      if (supportTitle) {
-        warnings.push(`Строка ${i + 1}: поддерживающее без корневого`);
-      }
-      continue;
-    }
+    const sectorWidth = valueAngleStep;
+    const rootStep = sectorWidth / rootCount;
 
-    let root = rootsMap.get(rootTitle);
-    if (!root) {
-      root = {
-        id: `r-${slugify(rootTitle)}`,
-        title: rootTitle,
-        short: rootTitle,
-        description: `Обещание: ${rootTitle}`,
-        who: whoRoot || undefined,
-        toWhom: toWhomRoot || undefined,
-        metrics: rootMetrics || undefined,
-        supports: [],
-      };
-      rootsMap.set(rootTitle, root);
-      value.promises.push(root);
-      rootToValue.set(rootTitle, valueName);
-      stats.roots++;
-    } else {
-      const existingValueName = rootToValue.get(rootTitle);
-      if (existingValueName && existingValueName !== valueName) {
-        const existingValue = valuesMap.get(existingValueName);
-        if (existingValue) {
-          const existingCount = existingValue.promises.length;
-          const currentCount = value.promises.length;
+    value.promises.forEach((root, j) => {
+      const rootAngle = valueAngle - sectorWidth / 2 + rootStep * (j + 0.5);
+      const rx = Math.cos(rootAngle) * rootRingR;
+      const ry = Math.sin(rootAngle) * rootRingR;
 
-          if (currentCount < existingCount) {
-            existingValue.promises = existingValue.promises.filter((p) => p.id !== root!.id);
-            value.promises.push(root);
-            rootToValue.set(rootTitle, valueName);
-            warnings.push(
-              `Обещание "${rootTitle}" перемещено из "${existingValueName}" (${existingCount} обещаний) в "${valueName}" (${currentCount + 1} обещаний)`,
-            );
-          } else if (currentCount === existingCount) {
-            warnings.push(
-              `Обещание "${rootTitle}" уже есть в "${existingValueName}" (${existingCount} обещаний). Оставлено там (количество равно).`,
-            );
-          } else {
-            warnings.push(
-              `Обещание "${rootTitle}" уже есть в "${existingValueName}" (${existingCount} обещаний). Оставлено там (в "${valueName}" больше обещаний: ${currentCount}).`,
-            );
-          }
-        }
-      }
-    }
-
-    if (supportTitle) {
-      // Проверяем, существует ли уже support с таким названием где-то в дереве.
-      // Если да — не создаём дубль, а связываем с текущим корневым через extraParentIds.
-      let existingSupport: SupportDef | null = null;
-      for (const v of valuesMap.values()) {
-        existingSupport = findSupportByTitle(v.promises, supportTitle);
-        if (existingSupport) break;
-      }
-
-      if (existingSupport) {
-        if (!existingSupport.extraParentIds) existingSupport.extraParentIds = [];
-        if (!existingSupport.extraParentIds.includes(root.id)) {
-          existingSupport.extraParentIds.push(root.id);
-          warnings.push(
-            `Строка ${i + 1}: поддерживающее "${supportTitle}" связано также с корневым "${rootTitle}"`,
-          );
-        }
-      } else {
-        root.supports.push({
-          id: `s-${slugify(supportTitle)}-${root.supports.length}`,
-          title: supportTitle,
-          description: `Поддерживающее: ${supportTitle}`,
-          who: whoSupport || undefined,
-          toWhom: toWhomSupport || undefined,
-          metrics: supportMetrics || undefined,
+      if (!nodeIds.has(root.id)) {
+        nodeIds.add(root.id);
+        nodes.push({
+          id: root.id,
+          tier: "root",
+          title: root.title,
+          short: root.short,
+          description: root.description,
+          parentId: value.id,
+          familyId: value.id,
+          familyTitle: value.title,
+          color: value.color,
+          x: rx,
+          y: ry,
+          r: NODE_R.root,
+          delay: 0.55 + i * 0.06 + j * 0.05,
+          childrenIds: root.supports.map((s) => s.id),
+          who: root.who,
+          toWhom: root.toWhom,
+          metrics: root.metrics,
         });
-        stats.supports++;
+      }
+
+      processSupports(
+        root.supports ?? [],
+        root.id,
+        rootAngle,
+        rootStep,
+        value.id,
+        value.title,
+        value.color,
+        i,
+        j,
+        supportRingR,
+        support2RingR,
+        nodes,
+        nodeIds,
+        0
+      );
+    });
+  });
+
+  resolveOverlaps(nodes, valueRingR, rootRingR, supportRingR);
+
+  // ─── Обработка общих поддерживающих с несколькими родителями ──────
+  // Узел остаётся один, но перемещается на усреднённый угол между всеми
+  // его родителями. childrenIds дополнительных родителей пополняются этим узлом.
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+
+  for (const node of nodes) {
+    if (node.tier !== "support" || !node.extraParentIds || node.extraParentIds.length === 0) continue;
+
+    const allParentIds = [node.parentId, ...node.extraParentIds].filter((id): id is string => Boolean(id));
+    const parentAngles: number[] = [];
+
+    for (const pid of allParentIds) {
+      const parent = nodeMap.get(pid);
+      if (parent) parentAngles.push(Math.atan2(parent.y, parent.x));
+    }
+
+    if (parentAngles.length < 2) continue;
+
+    // Усреднённый угол через сумму единичных векторов — корректно работает
+    // даже когда родители находятся по разные стороны от центра (стык -180/+180)
+    let sumX = 0, sumY = 0;
+    for (const a of parentAngles) {
+      sumX += Math.cos(a);
+      sumY += Math.sin(a);
+    }
+    const avgAngle = Math.atan2(sumY, sumX);
+
+    const r = Math.hypot(node.x, node.y);
+    node.x = Math.cos(avgAngle) * r;
+    node.y = Math.sin(avgAngle) * r;
+
+    // Добавляем этот узел в childrenIds дополнительных родителей
+    for (const pid of node.extraParentIds) {
+      const extraParent = nodeMap.get(pid);
+      if (extraParent && !extraParent.childrenIds.includes(node.id)) {
+        extraParent.childrenIds.push(node.id);
       }
     }
   }
 
-  // ─── Общие обещания: ищем второй лист (по имени или по заголовкам) ───
-
-  const generalPromises: GeneralPromiseDef[] = [];
-
-  let generalSheetName: string | null =
-    workbook.SheetNames.find((n) => n !== sheetName && n.toLowerCase().includes("общ")) ?? null;
-  let generalHeader: GeneralHeaderDetection | null = generalSheetName
-    ? detectGeneralHeader(readRows(workbook, generalSheetName))
-    : null;
-
-  if (!generalHeader) {
-    for (const name of workbook.SheetNames) {
-      if (name === sheetName) continue;
-      const detected = detectGeneralHeader(readRows(workbook, name));
-      if (detected) {
-        generalSheetName = name;
-        generalHeader = detected;
-        break;
+  // Apply custom positions if provided
+  if (customPositions) {
+    for (const node of nodes) {
+      const pos = customPositions[node.id];
+      if (pos) {
+        node.x = pos.x;
+        node.y = pos.y;
       }
     }
   }
 
-  if (generalSheetName && generalHeader) {
-    const generalRows = readRows(workbook, generalSheetName);
-    const { columnMap: gMap } = generalHeader;
+  // Build edges
+  nodes.forEach((node) => {
+    if (node.parentId) {
+      const parent = nodeMap.get(node.parentId);
+      if (parent) {
+        const [x1, y1, x2, y2] = trimmed(parent.x, parent.y, parent.r, node.x, node.y, node.r);
+        const d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+        edges.push({
+          id: `e-${parent.id}-${node.id}`,
+          from: parent.id,
+          to: node.id,
+          color: node.tier === "value" ? CORE_COLOR : node.color,
+          d,
+          delay: node.delay - 0.1,
+        });
+      }
+    }
 
-    const getGeneral = (row: unknown[], key: GeneralFieldKey): string => {
-      const idx = gMap[key];
-      return idx !== undefined ? cellStr(row[idx]) : "";
-    };
-
-    for (let i = generalHeader.headerIdx + 1; i < generalRows.length; i++) {
-      const row = generalRows[i];
-      if (!row || row.length === 0) continue;
-
-      const title = getGeneral(row, "title");
-      if (!title) {
-        if (getGeneral(row, "description") || getGeneral(row, "who")) {
-          warnings.push(`Лист "${generalSheetName}", строка ${i + 1}: отсутствует название общего обещания`);
+    // Дополнительные рёбра для extraParentIds
+    if (node.extraParentIds) {
+      for (const extraPid of node.extraParentIds) {
+        if (extraPid === node.parentId) continue;
+        const extraParent = nodeMap.get(extraPid);
+        if (extraParent) {
+          const [x1, y1, x2, y2] = trimmed(extraParent.x, extraParent.y, extraParent.r, node.x, node.y, node.r);
+          const d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+          edges.push({
+            id: `e-${extraPid}-${node.id}`,
+            from: extraPid,
+            to: node.id,
+            color: node.color,
+            d,
+            delay: node.delay - 0.1,
+          });
         }
-        continue;
       }
+    }
+  });
 
-      if (generalPromises.some((p) => p.title === title)) {
-        warnings.push(`Лист "${generalSheetName}", строка ${i + 1}: дубликат общего обещания "${title}"`);
-        continue;
-      }
+  // Calculate bounds
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
 
-      generalPromises.push({
-        id: `g-${slugify(title)}`,
-        title,
-        description: getGeneral(row, "description") || title,
-        who: getGeneral(row, "who"),
-        toWhom: getGeneral(row, "toWhom") || undefined,
-        metrics: getGeneral(row, "metrics") || undefined,
+  for (const nd of nodes) {
+    minX = Math.min(minX, nd.x - nd.r - 90);
+    minY = Math.min(minY, nd.y - nd.r - 90);
+    maxX = Math.max(maxX, nd.x + nd.r + 90);
+    maxY = Math.max(maxY, nd.y + nd.r + 90);
+  }
+
+  return { nodes, edges, bounds: { minX, minY, maxX, maxY } };
+}
+
+/**
+ * Рекурсивно обрабатывает поддерживающие обещания и их вложенные уровни.
+ * depth: 0 = первый уровень (от корневого), 1 = второй уровень (от поддерживающего)
+ */
+function processSupports(
+  supports: SupportDef[],
+  parentId: string,
+  parentAngle: number,
+  parentStep: number,
+  familyId: string,
+  familyTitle: string,
+  color: string,
+  valueIdx: number,
+  rootIdx: number,
+  ringR: number,
+  ringR2: number,
+  nodes: GraphNode[],
+  nodeIds: Set<string>,
+  depth: number
+): void {
+  if (supports.length === 0) return;
+
+  const supportCount = supports.length;
+  const subSectorWidth = parentStep;
+  const supportStep = subSectorWidth / supportCount;
+
+  supports.forEach((sup, t) => {
+    const supportAngle = parentAngle - subSectorWidth / 2 + supportStep * (t + 0.5);
+    const sx = Math.cos(supportAngle) * (depth === 0 ? ringR : ringR2);
+    const sy = Math.sin(supportAngle) * (depth === 0 ? ringR : ringR2);
+
+    if (!nodeIds.has(sup.id)) {
+      nodeIds.add(sup.id);
+      nodes.push({
+        id: sup.id,
+        tier: "support",
+        title: sup.title,
+        short: "",
+        description: sup.description,
+        parentId,
+        familyId,
+        familyTitle,
+        color,
+        x: sx,
+        y: sy,
+        r: NODE_R.support,
+        delay: depth === 0
+          ? 0.95 + valueIdx * 0.05 + rootIdx * 0.04 + t * 0.045
+          : 1.25 + valueIdx * 0.05 + rootIdx * 0.04 + t * 0.045,
+        childrenIds: sup.supports?.map((s) => s.id) ?? [],
+        who: sup.who,
+        toWhom: sup.toWhom,
+        metrics: sup.metrics,
+        extraParentIds: sup.extraParentIds,
       });
-      stats.general++;
     }
+
+    if (depth < 1 && sup.supports && sup.supports.length > 0) {
+      processSupports(
+        sup.supports,
+        sup.id,
+        supportAngle,
+        supportStep,
+        familyId,
+        familyTitle,
+        color,
+        valueIdx,
+        rootIdx,
+        ringR,
+        ringR2,
+        nodes,
+        nodeIds,
+        depth + 1
+      );
+    }
+  });
+}
+
+export function collectFamily(id: string, byId: Map<string, GraphNode>): Set<string> {
+  const result = new Set<string>();
+  const node = byId.get(id);
+  if (!node) return result;
+
+  result.add(id);
+
+  // Add all descendants
+  const queue = [...node.childrenIds];
+  while (queue.length > 0) {
+    const childId = queue.shift()!;
+    if (result.has(childId)) continue;
+    result.add(childId);
+    const child = byId.get(childId);
+    if (child) queue.push(...child.childrenIds);
   }
 
-  // ─── Цепочки поддерживающих обещаний: ищем третий лист ───
+  // Add parent chain: обходим ВСЕХ родителей (основного и дополнительных)
+  const parentQueue: string[] = [];
+  if (node.parentId) parentQueue.push(node.parentId);
+  if (node.extraParentIds) parentQueue.push(...node.extraParentIds);
 
-  let chainSheetName: string | null =
-    workbook.SheetNames.find((n) => n.toLowerCase().includes("цепочк") || (n.toLowerCase().includes("поддерж") && !n.toLowerCase().includes("общ"))) ?? null;
-  let chainHeader: ChainHeaderDetection | null = chainSheetName
-    ? detectChainHeader(readRows(workbook, chainSheetName))
-    : null;
-
-  if (!chainHeader) {
-    for (const name of workbook.SheetNames) {
-      if (name === sheetName || name === generalSheetName) continue;
-      const detected = detectChainHeader(readRows(workbook, name));
-      if (detected) {
-        chainSheetName = name;
-        chainHeader = detected;
-        break;
-      }
-    }
+  while (parentQueue.length > 0) {
+    const pid = parentQueue.shift()!;
+    if (result.has(pid)) continue;
+    result.add(pid);
+    const parent = byId.get(pid);
+    if (!parent) continue;
+    if (parent.parentId) parentQueue.push(parent.parentId);
+    if (parent.extraParentIds) parentQueue.push(...parent.extraParentIds);
   }
 
-  if (chainSheetName && chainHeader) {
-    const chainRows = readRows(workbook, chainSheetName);
-    const { columnMap: cMap } = chainHeader;
+  return result;
+}
 
-    const getChain = (row: unknown[], key: ChainFieldKey): string => {
-      const idx = cMap[key];
-      return idx !== undefined ? cellStr(row[idx]) : "";
-    };
+function resolveOverlaps(
+  nodes: GraphNode[],
+  _valueRingR: number,
+  _rootRingR: number,
+  _supportRingR: number,
+): void {
+  const tiers: Tier[] = ["value", "root", "support"];
 
-    for (let i = chainHeader.headerIdx + 1; i < chainRows.length; i++) {
-      const row = chainRows[i];
-      if (!row || row.length === 0) continue;
+  tiers.forEach((tier) => {
+    const tierNodes = nodes.filter((n) => n.tier === tier);
+    if (tierNodes.length < 2) return;
 
-      const parentTitle = getChain(row, "parent");
-      const childTitle = getChain(row, "child");
+    tierNodes.sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
 
-      if (!parentTitle || !childTitle) {
-        if (parentTitle || childTitle) {
-          warnings.push(
-            `Лист "${chainSheetName}", строка ${i + 1}: отсутствует родительское или дочернее обещание`,
-          );
-        }
-        continue;
+    for (let i = 0; i < tierNodes.length; i++) {
+      const current = tierNodes[i];
+      const next = tierNodes[(i + 1) % tierNodes.length];
+
+      const dx = next.x - current.x;
+      const dy = next.y - current.y;
+      const distance = Math.hypot(dx, dy);
+      const minDistance = current.r + next.r + NODE_GAP;
+
+      if (distance < minDistance) {
+        const overlap = minDistance - distance;
+        const angle = Math.atan2(dy, dx);
+        const pushX = (Math.cos(angle) * overlap) / 2;
+        const pushY = (Math.sin(angle) * overlap) / 2;
+
+        current.x -= pushX;
+        current.y -= pushY;
+        next.x += pushX;
+        next.y += pushY;
       }
-
-      let parentSupport: SupportDef | null = null;
-      for (const value of valuesMap.values()) {
-        parentSupport = findSupportByTitle(value.promises, parentTitle);
-        if (parentSupport) break;
-      }
-
-      if (!parentSupport) {
-        warnings.push(
-          `Лист "${chainSheetName}", строка ${i + 1}: не найдено родительское обещание "${parentTitle}"`,
-        );
-        continue;
-      }
-
-      if (parentSupport.supports && parentSupport.supports.length > 0) {
-        warnings.push(
-          `Лист "${chainSheetName}", строка ${i + 1}: у "${parentTitle}" уже есть дочерние обещания (максимум 4 уровня дерева)`,
-        );
-        continue;
-      }
-
-      if (parentSupport.supports?.some((s) => s.title === childTitle)) {
-        warnings.push(
-          `Лист "${chainSheetName}", строка ${i + 1}: дочернее обещание "${childTitle}" уже есть у "${parentTitle}"`,
-        );
-        continue;
-      }
-
-      if (!parentSupport.supports) {
-        parentSupport.supports = [];
-      }
-
-      parentSupport.supports.push({
-        id: `s-${slugify(childTitle)}-${parentSupport.supports.length}`,
-        title: childTitle,
-        description: getChain(row, "description") || `Поддерживающее: ${childTitle}`,
-        who: getChain(row, "who") || undefined,
-        toWhom: getChain(row, "toWhom") || undefined,
-        metrics: getChain(row, "metrics") || undefined,
-      });
-
-      stats.chains++;
     }
-  }
-
-  return {
-    values: Array.from(valuesMap.values()),
-    generalPromises,
-    warnings,
-    stats,
-  };
+  });
 }
