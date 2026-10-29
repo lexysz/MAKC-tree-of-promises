@@ -504,9 +504,16 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
                 <input className="field" value={toWhom} onChange={(e) => setToWhom(e.target.value)} placeholder="Клиенты B2B" />
               </div>
             </div>
-            <div className="mt-5">
+             <div className="mt-5">
               <label className="field-label">Метрики</label>
-              <input className="field" value={metrics} onChange={(e) => setMetrics(e.target.value)} placeholder="Аптайм ≥ 99,9% · NPS ≥ 60" />
+              <textarea
+                className="field min-h-[96px] resize-y leading-relaxed"
+                rows={4}
+                value={metrics}
+                onChange={(e) => setMetrics(e.target.value)}
+                placeholder={"Аптайм ≥ 99,9%\nNPS ≥ 60\nВремя ответа ≤ 2 ч"}
+              />
+              <p className="mt-1.5 text-[10.5px] text-mist-500">Каждая строка — отдельная метрика</p>
             </div>
           </div>
         )}
