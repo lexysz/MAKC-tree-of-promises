@@ -11,7 +11,7 @@ import { useTreeData } from "./state/useTreeData";
 import { supabase } from "./lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 
-// ─── Constants ──────────────────────────────────────────────────
+// ─── Constants ─────────────────────────────────────────────────
 
 const ZOOM_IN_FACTOR = 1.35;
 const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
@@ -537,7 +537,7 @@ function ZoomControls({ canvasRef }: { canvasRef: React.RefObject<TreeCanvasHand
 // ─── Main Component ──────────────────────────────────────────────
 
 export default function App() {
-  const { data, modified, loading, updateNode, updateCompany, replaceValues, forceSync, reset, updateNodePosition, resetAllPositions } = useTreeData();
+  const { data, modified, loading, updateNode, updateCompany, updateGeneralPromise, replaceValues, forceSync, reset, updateNodePosition, resetAllPositions } = useTreeData();
   const { session, checking, authed } = useAuth();
   const [view, setView] = useState<View>("tree");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -805,6 +805,7 @@ export default function App() {
             onBack={() => setView("tree")}
             onLogout={async () => await supabase.auth.signOut()}
             onSave={updateNode}
+            onSaveGeneralPromise={updateGeneralPromise}
             onUpdateCompany={updateCompany}
             onApplyImport={(r) => {
               replaceValues(r.values, r.generalPromises);
