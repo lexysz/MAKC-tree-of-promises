@@ -14,6 +14,8 @@ export interface SupportDef {
   toWhom?: string;
   metrics?: string;
   supports?: SupportDef[];
+  /** id дополнительных корневых обещаний, которым это обещание также является поддерживающим */
+  extraParentIds?: string[];
 }
 
 export interface RootDef {
