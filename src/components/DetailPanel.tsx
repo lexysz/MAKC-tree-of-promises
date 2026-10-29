@@ -27,16 +27,20 @@ interface Props {
   /**
    * Предки текущего узла по цепочке: от ценности до непосредственного родителя.
    * Без ядра компании. Порядок — от верхнего уровня к нижнему.
-   * Необязателен: без него крошки строятся только от ближайшего родителя.
    */
   ancestors?: GraphNode[];
+  /**
+   * Дополнительные корневые обещания, которым этот support также является поддерживающим.
+   * Отличаются от основного parent — показываются отдельным блоком с пометкой «доп. связь».
+   */
+  extraParents?: GraphNode[];
   onClose: () => void;
   onNavigate: (id: string) => void;
   onNavigateGeneral: (id: string) => void;
   onBackToCompany: () => void;
 }
 
-// ─── Icons ─────────────────────────────────────────────────────
+// ─── Icons ──────────────────────────────────────────────────────
 
 function CloseIcon() {
   return (
@@ -217,7 +221,6 @@ function Breadcrumbs({
 
 /**
  * Секция карточки компании: витрина общих (клиентократических) обещаний.
- * Размещается ПОСЛЕ секции связей дерева (ценностей).
  */
 function GeneralPromisesSection({
   items,
@@ -278,12 +281,12 @@ interface ConnectionsProps {
   node: GraphNode;
   parent: GraphNode | null;
   children: GraphNode[];
+  extraParents?: GraphNode[];
   onNavigate: (id: string) => void;
 }
 
-function Connections({ node, parent, children, onNavigate }: ConnectionsProps) {
+function Connections({ node, parent, children, extraParents, onNavigate }: ConnectionsProps) {
   const childrenLabel = CHILDREN_LABELS[node.tier] || "Связи";
-  // Дочерние узлы support-узла — это поддерживающие второго уровня.
   const isChainLevel = node.tier === "support";
 
   return (
@@ -305,6 +308,30 @@ function Connections({ node, parent, children, onNavigate }: ConnectionsProps) {
             <span className="block truncate text-[13.5px] font-medium text-mist-100">{parent.title}</span>
           </span>
         </button>
+      )}
+
+      {/* Дополнительные связи с другими корневыми (для общего поддерживающего) */}
+      {extraParents && extraParents.length > 0 && (
+        <div className="mt-2 flex flex-col gap-1.5">
+          {extraParents.map((ep) => (
+            <button
+              key={ep.id}
+              onClick={() => onNavigate(ep.id)}
+              className="group flex w-full items-center gap-3 rounded-lg border border-ink-700/60 bg-ink-850/40 px-3.5 py-2.5 text-left transition hover:border-mist-500/60 hover:bg-ink-800"
+            >
+              <ArrowUpIcon />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[10px] font-medium uppercase tracking-[0.14em] text-mist-500">
+                  уровень выше
+                </span>
+                <span className="block truncate text-[13.5px] font-medium text-mist-100">{ep.title}</span>
+              </span>
+              <span className="shrink-0 rounded-full border border-ink-700/60 bg-ink-850 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.08em] text-mist-400">
+                доп. связь
+              </span>
+            </button>
+          ))}
+        </div>
       )}
 
       {children.length > 0 && (
@@ -459,6 +486,7 @@ export default function DetailPanel({
   generalPromises,
   generalPromise,
   ancestors,
+  extraParents,
   onClose,
   onNavigate,
   onNavigateGeneral,
@@ -482,7 +510,6 @@ export default function DetailPanel({
     isOpen ? "max-md:translate-y-0" : "max-md:translate-y-full",
   ].join(" ");
 
-  // Фолбэк для случая, когда полный путь ещё не передаётся из App.
   const ancestorChain = ancestors ?? (parent ? [parent] : []);
 
   return (
@@ -507,8 +534,13 @@ export default function DetailPanel({
 
             <NodeContent node={node} />
 
-            {/* Сначала ценности (связи дерева), затем общие обещания. */}
-            <Connections node={node} parent={parent} children={children} onNavigate={onNavigate} />
+            <Connections
+              node={node}
+              parent={parent}
+              children={children}
+              extraParents={extraParents}
+              onNavigate={onNavigate}
+            />
 
             {node.tier === "company" && (
               <GeneralPromisesSection items={generalPromises} onNavigateGeneral={onNavigateGeneral} />
