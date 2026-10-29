@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CompanyDef, TreeData, ValueDef } from "../../data/tree";
+import type { CompanyDef, TreeData, ValueDef, SupportDef } from "../../data/tree";
 import { TIER_LABEL } from "../../data/tree";
 import type { NodePatch } from "../../state/useTreeData";
 import type { ImportResult } from "../../lib/excel";
@@ -13,10 +13,10 @@ const TOAST_DURATION_MS = 2600;
 const CONFIRM_TIMEOUT_MS = 3200;
 const SAVED_INDICATOR_MS = 1900;
 
-type Tier = "company" | "value" | "root" | "support";
+type Tier = "company" | "value" | "root" | "support" | "general";
 type Tab = "editor" | "import";
 
-// ─── Types ───────────────────────────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────────
 
 interface AnyDef {
   tier: Tier;
@@ -37,6 +37,7 @@ interface Props {
   onBack: () => void;
   onLogout: () => void;
   onSave: (id: string, patch: NodePatch) => void;
+  onSaveGeneralPromise: (id: string, patch: NodePatch) => void;
   onUpdateCompany: (patch: Partial<CompanyDef>) => void;
   onApplyImport: (result: ImportResult) => void;
   onReset: () => void;
@@ -46,7 +47,7 @@ interface Props {
 // ─── Helpers ────────────────────────────────────────────────────
 
 /**
- * Находит узел любого типа в структуре дерева.
+ * Находит узел любого типа в структуре дерева, включая общие обещания.
  * Все переборы защищены Array.isArray на случай испорченных данных.
  */
 function findAny(data: TreeData, id: string): AnyDef | null {
@@ -81,6 +82,23 @@ function findAny(data: TreeData, id: string): AnyDef | null {
       }
     }
   }
+
+  const generals = Array.isArray(data.generalPromises) ? data.generalPromises : [];
+  for (const gp of generals) {
+    if (gp.id === id) {
+      return {
+        tier: "general",
+        id: gp.id,
+        title: gp.title ?? "",
+        description: gp.description ?? "",
+        who: gp.who,
+        toWhom: gp.toWhom,
+        metrics: gp.metrics,
+        color: CORE_COLOR,
+      };
+    }
+  }
+
   return null;
 }
 
@@ -178,7 +196,7 @@ function UploadIcon() {
 function DownloadIcon() {
   return (
     <svg width="12" height="12" viewBox="0 0 14 14" fill="none">
-      <path d="M7 2v7.5m0 0L4 6.7M7 9.5l3-2.8M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7 2v7.5m0 0L4 6.7M7 9.5l3-2.8M2.5 12h9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }
@@ -221,7 +239,9 @@ function NodeListItem({ tier, id, title, color, active, onSelect, visible, inden
         style={
           tier === "support"
             ? { border: `2px solid ${color}` }
-            : { background: tier === "value" ? color : `${color}33`, boxShadow: `0 0 7px ${color}55` }
+            : tier === "general"
+              ? { border: `2px solid ${color}`, background: "transparent" }
+              : { background: tier === "value" ? color : `${color}33`, boxShadow: `0 0 7px ${color}55` }
         }
       />
       <span className={`min-w-0 flex-1 truncate text-[12.5px] leading-snug ${active ? "font-semibold text-mist-100" : "text-mist-300 group-hover:text-mist-100"}`}>
@@ -248,9 +268,12 @@ function ValueGroup({ value, selectedId, onSelect, query, tierFilter }: ValueGro
   const anyRootVisible = promises.some(
     (r) => matches(r.title) || (Array.isArray(r.supports) ? r.supports : []).some((s) => matches(s.title)),
   );
-  const showGroup = query
-    ? matches(value.title) || anyRootVisible
-    : tierFilter === "all" || anyRootVisible || matches(value.title);
+  // При фильтре «Общие» дерево не показываем
+  const showGroup = tierFilter === "general"
+    ? false
+    : query
+      ? matches(value.title) || anyRootVisible
+      : tierFilter === "all" || anyRootVisible || matches(value.title);
 
   if (!showGroup) return null;
 
@@ -326,10 +349,11 @@ function EmptyEditor() {
 interface NodeEditorProps {
   node: AnyDef;
   onSave: (patch: NodePatch) => void;
+  onSaveGeneral: (patch: NodePatch) => void;
   onUpdateCompany: (patch: Partial<CompanyDef>) => void;
 }
 
-function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
+function NodeEditor({ node, onSave, onSaveGeneral, onUpdateCompany }: NodeEditorProps) {
   // Безопасная инициализация: защищаемся от undefined в испорченных данных
   const [title, setTitle] = useState(node.title ?? "");
   const [short, setShort] = useState(node.short ?? "");
@@ -346,8 +370,10 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
   const logoInputRef = useRef<HTMLInputElement>(null);
 
   const isPromise = node.tier === "root" || node.tier === "support";
+  const isGeneral = node.tier === "general";
   const hasShort = node.tier === "company" || node.tier === "value" || node.tier === "root";
   const isCompany = node.tier === "company";
+  const tierLabel = isGeneral ? "Общее обещание" : TIER_LABEL[node.tier];
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -391,6 +417,14 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
         description: description.trim(),
         logo,
       });
+    } else if (isGeneral) {
+      onSaveGeneral({
+        title: title.trim() || (node.title ?? ""),
+        description: description.trim(),
+        who: who.trim(),
+        toWhom: toWhom.trim(),
+        metrics: metrics.trim(),
+      });
     } else {
       onSave({
         title: title.trim() || (node.title ?? ""),
@@ -413,7 +447,7 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
           style={{ borderColor: `${node.color}55`, color: node.color, background: `${node.color}12` }}
         >
           <span className="h-1.5 w-1.5 rounded-full" style={{ background: node.color }} />
-          {TIER_LABEL[node.tier]}
+          {tierLabel}
         </span>
         <code className="rounded bg-ink-800 px-1.5 py-0.5 text-[10px] text-mist-500">{node.id}</code>
         {saved && (
@@ -491,7 +525,7 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
           />
         </div>
 
-        {isPromise && (
+        {(isPromise || isGeneral) && (
           <div className="border-t border-ink-700/50 pt-5">
             <div className="mb-4 text-[10.5px] font-bold uppercase tracking-[0.18em] text-mist-500">Паспорт обещания</div>
             <div className="grid gap-5 sm:grid-cols-2">
@@ -504,7 +538,7 @@ function NodeEditor({ node, onSave, onUpdateCompany }: NodeEditorProps) {
                 <input className="field" value={toWhom} onChange={(e) => setToWhom(e.target.value)} placeholder="Клиенты B2B" />
               </div>
             </div>
-             <div className="mt-5">
+            <div className="mt-5">
               <label className="field-label">Метрики</label>
               <textarea
                 className="field min-h-[96px] resize-y leading-relaxed"
@@ -714,6 +748,7 @@ export default function AdminPanel({
   onBack,
   onLogout,
   onSave,
+  onSaveGeneralPromise,
   onUpdateCompany,
   onApplyImport,
   onReset,
@@ -738,16 +773,29 @@ export default function AdminPanel({
 
   const counts = useMemo(() => {
     let roots = 0;
-    let supports = 0;
+    // Как в шапке дерева: поддерживающие с одинаковым названием
+    // (дубли в разных ценностях) считаем за одно обещание;
+    // вложенные цепочки учитываются рекурсивно.
+    const supportTitles = new Set<string>();
+    const walkSupports = (supports: SupportDef[]) => {
+      for (const s of supports) {
+        const key = (s.title ?? "").trim().toLowerCase();
+        if (key) supportTitles.add(key);
+        if (Array.isArray(s.supports)) walkSupports(s.supports);
+      }
+    };
     const values = Array.isArray(data.values) ? data.values : [];
     values.forEach((v) => {
       const promises = Array.isArray(v.promises) ? v.promises : [];
       roots += promises.length;
-      promises.forEach((r) => {
-        supports += (Array.isArray(r.supports) ? r.supports : []).length;
-      });
+      promises.forEach((r) => walkSupports(Array.isArray(r.supports) ? r.supports : []));
     });
-    return { values: values.length, roots, supports };
+    return {
+      values: values.length,
+      roots,
+      supports: supportTitles.size,
+      general: (Array.isArray(data.generalPromises) ? data.generalPromises : []).length,
+    };
   }, [data]);
 
   const handleReset = () => {
@@ -766,6 +814,7 @@ export default function AdminPanel({
   };
 
   const values = Array.isArray(data.values) ? data.values : [];
+  const generalPromises = Array.isArray(data.generalPromises) ? data.generalPromises : [];
 
   return (
     <div className="relative z-10 flex h-full w-full flex-col">
@@ -784,7 +833,7 @@ export default function AdminPanel({
           <div>
             <div className="font-display text-[14px] font-bold leading-tight text-mist-100">Админ-панель</div>
             <div className="text-[10.5px] text-mist-500">
-              {counts.values} ценностей · {counts.roots} корневых · {counts.supports} поддерживающих
+              {counts.values} ценностей · {counts.roots} корневых · {counts.supports} поддерживающих · {counts.general} общих
               {modified && <span className="ml-1.5 font-semibold text-gold">· изменено</span>}
             </div>
           </div>
@@ -840,7 +889,7 @@ export default function AdminPanel({
             <div className="shrink-0 space-y-2.5 border-b border-ink-700/50 p-3.5">
               <input className="field" placeholder="Поиск…" value={query} onChange={(e) => setQuery(e.target.value)} />
               <div className="flex gap-1.5">
-                {(["all", "company", "value", "root", "support"] as const).map((filterKey) => (
+                {(["all", "company", "value", "root", "support", "general"] as const).map((filterKey) => (
                   <button
                     key={filterKey}
                     onClick={() => setTierFilter(filterKey)}
@@ -850,7 +899,7 @@ export default function AdminPanel({
                         : "border-ink-700/60 text-mist-500 hover:text-mist-300"
                     }`}
                   >
-                    {filterKey === "all" ? "Все" : filterKey === "company" ? "Ядро" : filterKey === "value" ? "Ценности" : filterKey === "root" ? "Корневые" : "Поддерж."}
+                    {filterKey === "all" ? "Все" : filterKey === "company" ? "Ядро" : filterKey === "value" ? "Ценности" : filterKey === "root" ? "Корневые" : filterKey === "general" ? "Общие" : "Поддерж."}
                   </button>
                 ))}
               </div>
@@ -876,6 +925,27 @@ export default function AdminPanel({
                   tierFilter={tierFilter}
                 />
               ))}
+
+              {/* Общие обещания: отдельная секция списка */}
+              {(tierFilter === "all" || tierFilter === "general") && generalPromises.length > 0 && (
+                <div className="mt-2 border-t border-ink-700/50 pt-2.5">
+                  <div className="mb-1 px-2.5 text-[10px] font-bold uppercase tracking-[0.16em] text-mist-500">
+                    Общие обещания
+                  </div>
+                  {generalPromises.map((gp) => (
+                    <NodeListItem
+                      key={gp.id}
+                      tier="general"
+                      id={gp.id}
+                      title={gp.title ?? ""}
+                      color={CORE_COLOR}
+                      active={selectedId === gp.id}
+                      onSelect={setSelectedId}
+                      visible={!query || (gp.title ?? "").toLowerCase().includes(query.trim().toLowerCase())}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </aside>
 
@@ -886,6 +956,10 @@ export default function AdminPanel({
                 node={selected}
                 onSave={(patch) => {
                   onSave(selected.id, patch);
+                  notify("Сохранено");
+                }}
+                onSaveGeneral={(patch) => {
+                  onSaveGeneralPromise(selected.id, patch);
                   notify("Сохранено");
                 }}
                 onUpdateCompany={onUpdateCompany}
