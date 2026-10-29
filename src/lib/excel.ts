@@ -382,20 +382,17 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
     }
 
     if (supportTitle) {
-      // Проверяем, существует ли уже support с таким названием где-то в дереве.
-      // Если да — не создаём дубль, а связываем с текущим корневым через extraParentIds.
-      let existingSupport: SupportDef | null = null;
-      for (const v of valuesMap.values()) {
-        existingSupport = findSupportByTitle(v.promises, supportTitle);
-        if (existingSupport) break;
-      }
+      // Ищем support с таким названием ТОЛЬКО в пределах текущей ценности:
+      // общая связь нескольких корней допустима внутри одной ценности,
+      // иначе линии связи пересекали бы всё дерево.
+      const existingSupport = findSupportByTitle(value.promises, supportTitle);
 
       if (existingSupport) {
         if (!existingSupport.extraParentIds) existingSupport.extraParentIds = [];
         if (!existingSupport.extraParentIds.includes(root.id)) {
           existingSupport.extraParentIds.push(root.id);
           warnings.push(
-            `Строка ${i + 1}: поддерживающее "${supportTitle}" связано также с корневым "${rootTitle}"`,
+            `Строка ${i + 1}: поддерживающее "${supportTitle}" связано также с корневым "${rootTitle}" (в пределах ценности "${valueName}")`,
           );
         }
       } else {
