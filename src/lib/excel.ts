@@ -223,7 +223,7 @@ function detectMainHeader(rows: unknown[][]): HeaderDetection | null {
   return null;
 }
 
-// ── Распознавание листа общих обещаний ─────────────────────────
+// ─── Распознавание листа общих обещаний ──────────────────────────
 
 type GeneralFieldKey = "title" | "description" | "who" | "toWhom" | "metrics";
 
@@ -305,7 +305,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   const sheetName = workbook.SheetNames[0];
   const rows = readRows(workbook, sheetName);
 
-  const : string[] = [];
+  const warnings: string[] = [];
   const valuesMap = new Map<string, ValueDef>();
   const rootsMap = new Map<string, RootDef>();
   const rootToValue = new Map<string, string>();
