@@ -39,7 +39,6 @@ export const GENERAL_TEMPLATE_HEADERS = [
 export const CHAIN_TEMPLATE_HEADERS = [
   "Родительское поддерживающее обещание",
   "Дочернее поддерживающее обещание",
-  "Описание",
   "Кто дает",
   "Кому",
   "Метрики",
@@ -86,7 +85,6 @@ export function downloadTemplate() {
     [
       "Ежемесячный отчёт о стабильности",
       "Автоматическая генерация отчёта",
-      "Скрипт собирает метрики из всех систем и формирует PDF",
       "DevOps",
       "Команда продукта",
       "Время генерации < 5 минут",
@@ -225,7 +223,7 @@ function detectMainHeader(rows: unknown[][]): HeaderDetection | null {
   return null;
 }
 
-// ─── Распознавание листа общих обещаний ──────────────────────────
+// ── Распознавание листа общих обещаний ─────────────────────────
 
 type GeneralFieldKey = "title" | "description" | "who" | "toWhom" | "metrics";
 
@@ -264,12 +262,11 @@ function detectGeneralHeader(rows: unknown[][]): GeneralHeaderDetection | null {
 
 // ─── Распознавание листа цепочек поддерживающих обещаний ─────────
 
-type ChainFieldKey = "parent" | "child" | "description" | "who" | "toWhom" | "metrics";
+type ChainFieldKey = "parent" | "child" | "who" | "toWhom" | "metrics";
 
 const CHAIN_HEADER_RULES: Array<{ key: ChainFieldKey; test: (h: string) => boolean }> = [
   { key: "parent", test: (h) => h.includes("родит") },
   { key: "child", test: (h) => h.includes("дочерн") || h.includes("поддерж") },
-  { key: "description", test: (h) => h.includes("описан") },
   { key: "who", test: (h) => h.includes("кто") },
   { key: "toWhom", test: (h) => h.includes("кому") },
   { key: "metrics", test: (h) => h.includes("метри") },
@@ -617,7 +614,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
       parentSupport.supports.push({
         id: `s-${slugify(childTitle)}-${parentSupport.supports.length}`,
         title: childTitle,
-        description: getChain(row, "description") || `Поддерживающее: ${childTitle}`,
+        description: `Поддерживающее: ${childTitle}`,
         who: getChain(row, "who") || undefined,
         toWhom: getChain(row, "toWhom") || undefined,
         metrics: getChain(row, "metrics") || undefined,
