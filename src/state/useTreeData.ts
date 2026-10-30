@@ -240,7 +240,9 @@ async function saveToSupabase(data: TreeData): Promise<void> {
 // ─── Hook ────────────────────────────────────────────────────────
 
 export function useTreeData() {
-  const [data, setData] = useState<TreeData>(createEmptyTree());
+  // ПРОГРЕССИВНАЯ ЗАГРУЗКА: начинаем с localStorage, чтобы показать дерево мгновенно.
+  // Supabase подтянет актуальную версию в фоне.
+  const [data, setData] = useState<TreeData>(() => loadFromStorage() ?? createEmptyTree());
   const [modified, setModified] = useState(false);
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
@@ -249,17 +251,21 @@ export function useTreeData() {
   // Используется в Realtime-подписке, чтобы игнорировать эхо собственных изменений.
   const lastLocalSaveRef = useRef<number>(0);
 
-  // Initial load from Supabase (primary source)
+  // Initial load from Supabase (background sync)
   useEffect(() => {
     let isMounted = true;
 
     (async () => {
       const supabaseData = await loadFromSupabase();
       if (isMounted) {
-        // Supabase как основной источник, localStorage как fallback
-        const sourceData = supabaseData ?? loadFromStorage() ?? createEmptyTree();
-        setData(sourceData);
-        setModified(true);
+        if (supabaseData) {
+          // Supabase ответил — применяем актуальную версию и обновляем кэш
+          setData(supabaseData);
+          saveToStorage(supabaseData);
+          setModified(true);
+        }
+        // Флаг «первая синхронизация» снимаем всегда, даже если Supabase не ответил:
+        // данные уже на экране из localStorage, UI не должен блокироваться.
         setLoading(false);
       }
     })();
