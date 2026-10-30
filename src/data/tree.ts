@@ -98,7 +98,7 @@ export function createEmptyTree(): TreeData {
  * Максимальная глубина дерева:
  * 0 = company, 1 = value, 2 = root, 3 = support, 4 = support 2-го уровня
  */
-export const MAX_TREE_DEPTH = 4;
+export const MAX_TREE_DEPTH = 7;
 
 /**
  * Возвращает глубину узла по типу.
