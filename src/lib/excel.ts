@@ -305,7 +305,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   const sheetName = workbook.SheetNames[0];
   const rows = readRows(workbook, sheetName);
 
-  const warnings: string[] = [];
+  const : string[] = [];
   const valuesMap = new Map<string, ValueDef>();
   const rootsMap = new Map<string, RootDef>();
   const rootToValue = new Map<string, string>();
@@ -595,7 +595,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
 
       if (parentSupport.supports && parentSupport.supports.length > 0) {
         warnings.push(
-          `Лист "${chainSheetName}", строка ${i + 1}: у "${parentTitle}" уже есть дочерние обещания (максимум 4 уровня дерева)`,
+          `Лист "${chainSheetName}", строка ${i + 1}: у "${parentTitle}" уже есть дочерние обещания (достигнут лимит 7 уровней дерева)`,
         );
         continue;
       }
