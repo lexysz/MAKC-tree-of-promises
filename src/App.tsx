@@ -7,7 +7,7 @@ import AdminPanel from "./components/admin/AdminPanel";
 import DepartmentFilterPanel, { type DepartmentInfo, type FilteredNode } from "./components/DepartmentFilterPanel";
 import { buildGraph, collectFamily, type GraphNode } from "./lib/layout";
 import { parseDepartments, matchesDepartment } from "./lib/departments";
-import { useTreeData } from "./state/useTreeData";
+import { useTreeData, type SyncStatus } from "./state/useTreeData";
 import { supabase } from "./lib/supabase";
 import type { Session } from "@supabase/supabase-js";
 
@@ -356,6 +356,7 @@ interface HeaderProps {
   onNavigate: (id: string) => void;
   onDepartmentFilterClick: () => void;
   isFilterActive: boolean;
+  syncStatus?: SyncStatus;
 }
 
 function Header({
@@ -367,6 +368,7 @@ function Header({
   onNavigate,
   onDepartmentFilterClick,
   isFilterActive,
+  syncStatus,
 }: HeaderProps) {
   return (
     <header className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-4 p-4 md:p-5">
@@ -422,6 +424,19 @@ function Header({
             <span className="grid h-2 w-2 place-items-center rounded-full bg-lagoon" aria-hidden="true" />
           )}
         </button>
+
+        {syncStatus === 'syncing' && (
+          <span className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg border border-ink-700/50 bg-ink-900/80 px-2.5 py-2 text-[10.5px] text-mist-400 backdrop-blur-md">
+            <span className="h-2 w-2 animate-pulse rounded-full bg-gold" />
+            обновляем
+          </span>
+        )}
+        {syncStatus === 'error' && (
+          <span className="pointer-events-auto inline-flex items-center gap-1.5 rounded-lg border border-ember/40 bg-ember/[0.08] px-2.5 py-2 text-[10.5px] text-ember backdrop-blur-md">
+            <span className="h-2 w-2 rounded-full bg-ember" />
+            оффлайн
+          </span>
+        )}
 
         <button
           onClick={onAdminClick}
@@ -537,7 +552,7 @@ function ZoomControls({ canvasRef }: { canvasRef: React.RefObject<TreeCanvasHand
 // ─── Main Component ──────────────────────────────────────────────
 
 export default function App() {
-  const { data, modified, loading, updateNode, updateCompany, updateGeneralPromise, replaceValues, forceSync, reset, updateNodePosition, resetAllPositions } = useTreeData();
+  const { data, modified, loading, updateNode, updateCompany, updateGeneralPromise, replaceValues, forceSync, reset, updateNodePosition, resetAllPositions, syncStatus } = useTreeData();
   const { session, checking, authed } = useAuth();
   const [view, setView] = useState<View>("tree");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -783,12 +798,14 @@ export default function App() {
 
   // ─── Рендеринг ─────────────────────────────────────────────────
 
-  if (loading || checking) {
+  // ПРОГРЕССИВНАЯ ЗАГРУЗКА: блокируем экран ТОЛЬКО на проверку авторизации.
+  // Само дерево рендерится мгновенно из localStorage, даже если Supabase ещё грузится.
+  if (checking) {
     return (
       <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
         <BackgroundGradient />
         <DustParticles />
-        <LoadingScreen message={checking ? "Проверка авторизации..." : "Загрузка данных из облака..."} />
+        <LoadingScreen message="Проверка авторизации..." />
       </div>
     );
   }
@@ -863,6 +880,7 @@ export default function App() {
           if (next) setPanelStateBeforeCard(null);
         }}
         isFilterActive={departmentFilter !== null}
+        syncStatus={syncStatus}
       />
 
       <Legend companyLogo={data.company.logo} />
