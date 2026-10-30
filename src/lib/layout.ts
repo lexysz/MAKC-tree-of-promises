@@ -375,7 +375,7 @@ function processSupports(
       });
     }
 
-    if (depth < 1 && sup.supports && sup.supports.length > 0) {
+    if (depth < 4 && sup.supports && sup.supports.length > 0) {
       processSupports(
         sup.supports,
         sup.id,
