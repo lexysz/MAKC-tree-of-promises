@@ -1,15 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import TreeCanvas from "./components/TreeCanvas";
 import type { TreeCanvasHandle } from "./components/TreeCanvas";
 import DetailPanel from "./components/DetailPanel";
-import AdminLogin from "./components/admin/AdminLogin";
-import AdminPanel from "./components/admin/AdminPanel";
 import DepartmentFilterPanel, { type DepartmentInfo, type FilteredNode } from "./components/DepartmentFilterPanel";
 import { buildGraph, collectFamily, type GraphNode } from "./lib/layout";
 import { parseDepartments, matchesDepartment } from "./lib/departments";
 import { useTreeData, type SyncStatus } from "./state/useTreeData";
 import { supabase } from "./lib/supabase";
 import type { Session } from "@supabase/supabase-js";
+
+// Админка и её тяжёлые зависимости (xlsx, dnd-kit, recharts) — отдельный чанк:
+// грузится только при входе в режим admin, зрителям дерева не скачивается.
+const AdminLogin = lazy(() => import("./components/admin/AdminLogin"));
+const AdminPanel = lazy(() => import("./components/admin/AdminPanel"));
 
 // ─── Constants ─────────────────────────────────────────────────
 
@@ -645,7 +648,7 @@ export default function App() {
     if (selectedGeneralId && !generalPromises.some((p) => p.id === selectedGeneralId)) {
       setSelectedGeneralId(null);
     }
-  }, [generalPromises, selectedGeneralId]);
+  }, [selectedGeneralId, generalPromises]);
 
   // Немедленная синхронизация после импорта: срабатывает ПОСЛЕ коммита нового
   // состояния, поэтому forceSync получает уже обновлённый снимок данных.
@@ -815,25 +818,27 @@ export default function App() {
       <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
         <BackgroundGradient />
         <DustParticles />
-        {authed ? (
-          <AdminPanel
-            data={data}
-            modified={modified}
-            onBack={() => setView("tree")}
-            onLogout={async () => await supabase.auth.signOut()}
-            onSave={updateNode}
-            onSaveGeneralPromise={updateGeneralPromise}
-            onUpdateCompany={updateCompany}
-            onApplyImport={(r) => {
-              replaceValues(r.values, r.generalPromises);
-              setImportSyncPending(true);
-            }}
-            onReset={reset}
-            onResetAllPositions={resetAllPositions}
-          />
-        ) : (
-          <AdminLogin onSuccess={() => {}} onBack={() => setView("tree")} />
-        )}
+        <Suspense fallback={<LoadingScreen message="Загрузка админ-панели..." />}>
+          {authed ? (
+            <AdminPanel
+              data={data}
+              modified={modified}
+              onBack={() => setView("tree")}
+              onLogout={async () => await supabase.auth.signOut()}
+              onSave={updateNode}
+              onSaveGeneralPromise={updateGeneralPromise}
+              onUpdateCompany={updateCompany}
+              onApplyImport={(r) => {
+                replaceValues(r.values, r.generalPromises);
+                setImportSyncPending(true);
+              }}
+              onReset={reset}
+              onResetAllPositions={resetAllPositions}
+            />
+          ) : (
+            <AdminLogin onSuccess={() => {}} onBack={() => setView("tree")} />
+          )}
+        </Suspense>
       </div>
     );
   }
