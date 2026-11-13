@@ -580,6 +580,7 @@ interface ImportSectionProps {
 function ImportSection({ onApplied }: ImportSectionProps) {
   const [drag, setDrag] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [templateBusy, setTemplateBusy] = useState(false);
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -599,6 +600,18 @@ function ImportSection({ onApplied }: ImportSectionProps) {
       setError(e instanceof Error ? e.message : "Не удалось разобрать файл.");
     } finally {
       setBusy(false);
+    }
+  };
+
+  const handleTemplate = async () => {
+    if (templateBusy) return;
+    setTemplateBusy(true);
+    try {
+      await downloadTemplate();
+    } catch {
+      setError("Не удалось сформировать шаблон. Попробуйте ещё раз.");
+    } finally {
+      setTemplateBusy(false);
     }
   };
 
@@ -711,10 +724,15 @@ function ImportSection({ onApplied }: ImportSectionProps) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-[12px] font-bold uppercase tracking-[0.16em] text-mist-500">Ожидаемые колонки</p>
             <button
-              onClick={downloadTemplate}
-              className="inline-flex items-center gap-2 rounded-lg border border-lagoon/40 px-3.5 py-1.5 text-[11.5px] font-semibold text-lagoon transition hover:bg-lagoon/10"
+              onClick={handleTemplate}
+              disabled={templateBusy}
+              className="inline-flex items-center gap-2 rounded-lg border border-lagoon/40 px-3.5 py-1.5 text-[11.5px] font-semibold text-lagoon transition hover:bg-lagoon/10 disabled:opacity-60"
             >
-              <DownloadIcon />
+              {templateBusy ? (
+                <span className="spinner h-3.5 w-3.5 rounded-full border-2 border-ink-700 border-t-lagoon" />
+              ) : (
+                <DownloadIcon />
+              )}
               Скачать шаблон .xlsx
             </button>
           </div>
