@@ -1,6 +1,13 @@
-import * as XLSX from "xlsx";
+import type { WorkBook } from "xlsx";
 import { getValueColor, findSupportByTitle } from "../data/tree";
 import type { GeneralPromiseDef, RootDef, ValueDef, SupportDef } from "../data/tree";
+
+// xlsx попадает в отдельный чанк и грузится только при первом импорте/экспорте.
+let xlsxModule: Promise<typeof import("xlsx")> | null = null;
+function loadXLSX(): Promise<typeof import("xlsx")> {
+  if (!xlsxModule) xlsxModule = import("xlsx");
+  return xlsxModule;
+}
 
 export interface ImportResult {
   values: ValueDef[];
@@ -44,7 +51,8 @@ export const CHAIN_TEMPLATE_HEADERS = [
   "Метрики",
 ];
 
-export function downloadTemplate() {
+export async function downloadTemplate() {
+  const XLSX = await loadXLSX();
   const sampleData = [
     [
       "Команда продукта",
@@ -139,7 +147,8 @@ function normHeader(s: string): string {
   return s.toLowerCase().replace(/[^a-zа-яё0-9]/g, "");
 }
 
-function readRows(workbook: XLSX.WorkBook, sheetName: string): unknown[][] {
+async function readRows(workbook: WorkBook, sheetName: string): Promise<unknown[][]> {
+  const XLSX = await loadXLSX();
   return XLSX.utils.sheet_to_json<unknown[]>(workbook.Sheets[sheetName], { header: 1 });
 }
 
@@ -300,10 +309,11 @@ function detectChainHeader(rows: unknown[][]): ChainHeaderDetection | null {
 // ─── Основной парсинг ────────────────────────────────────────────
 
 export async function parseWorkbook(file: File): Promise<ImportResult> {
+  const XLSX = await loadXLSX();
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: "array" });
   const sheetName = workbook.SheetNames[0];
-  const rows = readRows(workbook, sheetName);
+  const rows = await readRows(workbook, sheetName);
 
   const warnings: string[] = [];
   const valuesMap = new Map<string, ValueDef>();
@@ -481,14 +491,15 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
 
   let generalSheetName: string | null =
     workbook.SheetNames.find((n) => n !== sheetName && n.toLowerCase().includes("общ")) ?? null;
-  let generalHeader: GeneralHeaderDetection | null = generalSheetName
-    ? detectGeneralHeader(readRows(workbook, generalSheetName))
-    : null;
+  let generalHeader: GeneralHeaderDetection | null = null;
+  if (generalSheetName) {
+    generalHeader = detectGeneralHeader(await readRows(workbook, generalSheetName));
+  }
 
   if (!generalHeader) {
     for (const name of workbook.SheetNames) {
       if (name === sheetName) continue;
-      const detected = detectGeneralHeader(readRows(workbook, name));
+      const detected = detectGeneralHeader(await readRows(workbook, name));
       if (detected) {
         generalSheetName = name;
         generalHeader = detected;
@@ -498,7 +509,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   }
 
   if (generalSheetName && generalHeader) {
-    const generalRows = readRows(workbook, generalSheetName);
+    const generalRows = await readRows(workbook, generalSheetName);
     const { columnMap: gMap } = generalHeader;
 
     const getGeneral = (row: unknown[], key: GeneralFieldKey): string => {
@@ -539,14 +550,15 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
 
   let chainSheetName: string | null =
     workbook.SheetNames.find((n) => n.toLowerCase().includes("цепочк") || (n.toLowerCase().includes("поддерж") && !n.toLowerCase().includes("общ"))) ?? null;
-  let chainHeader: ChainHeaderDetection | null = chainSheetName
-    ? detectChainHeader(readRows(workbook, chainSheetName))
-    : null;
+  let chainHeader: ChainHeaderDetection | null = null;
+  if (chainSheetName) {
+    chainHeader = detectChainHeader(await readRows(workbook, chainSheetName));
+  }
 
   if (!chainHeader) {
     for (const name of workbook.SheetNames) {
       if (name === sheetName || name === generalSheetName) continue;
-      const detected = detectChainHeader(readRows(workbook, name));
+      const detected = detectChainHeader(await readRows(workbook, name));
       if (detected) {
         chainSheetName = name;
         chainHeader = detected;
@@ -556,7 +568,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   }
 
   if (chainSheetName && chainHeader) {
-    const chainRows = readRows(workbook, chainSheetName);
+    const chainRows = await readRows(workbook, chainSheetName);
     const { columnMap: cMap } = chainHeader;
 
     const getChain = (row: unknown[], key: ChainFieldKey): string => {
