@@ -344,10 +344,17 @@ function processSupports(
   const subSectorWidth = parentStep;
   const supportStep = subSectorWidth / supportCount;
 
+  // Каждому уровню вложенности цепочки — своё кольцо радиуса.
+  // Раньше depth >= 1 все сидели на одном ringR2 и дочерний support
+  // ложился в одну точку с родителем (пересечение/наложение).
+  // depth 0 -> ringR, depth 1 -> ringR2 (как было), дальше — расходятся наружу.
+  const levelStep = ringR2 - ringR;
+  const levelR = depth === 0 ? ringR : ringR + depth * levelStep;
+
   supports.forEach((sup, t) => {
     const supportAngle = parentAngle - subSectorWidth / 2 + supportStep * (t + 0.5);
-    const sx = Math.cos(supportAngle) * (depth === 0 ? ringR : ringR2);
-    const sy = Math.sin(supportAngle) * (depth === 0 ? ringR : ringR2);
+    const sx = Math.cos(supportAngle) * levelR;
+    const sy = Math.sin(supportAngle) * levelR;
 
     if (!nodeIds.has(sup.id)) {
       nodeIds.add(sup.id);
