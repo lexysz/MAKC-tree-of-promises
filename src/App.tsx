@@ -658,6 +658,25 @@ export default function App() {
     void forceSync();
   }, [importSyncPending, forceSync]);
 
+    // Favicon вкладки = актуальный логотип компании (data URL из tree.json / GitHub).
+  // Пока логотипа нет — фирменный знак из public/favicon.svg.
+  useEffect(() => {
+    const logo = data.company.logo;
+    let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+    if (!link) {
+      link = document.createElement("link");
+      link.rel = "icon";
+      document.head.appendChild(link);
+    }
+    if (logo) {
+      link.type = "image/png";
+      link.href = logo;
+    } else {
+      link.type = "image/svg+xml";
+      link.href = `${import.meta.env.BASE_URL}favicon.svg`;
+    }
+  }, [data.company.logo]);
+
   /** Скрывает панель фильтра при открытии карточки, запоминая её состояние */
   const hidePanelForCard = () => {
     if (showDepartmentPanel && panelStateBeforeCard === null) {
