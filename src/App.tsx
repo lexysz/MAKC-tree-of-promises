@@ -14,7 +14,7 @@ import type { Session } from "@supabase/supabase-js";
 const AdminLogin = lazy(() => import("./components/admin/AdminLogin"));
 const AdminPanel = lazy(() => import("./components/admin/AdminPanel"));
 
-// ─── Constants ─────────────────────────────────────────────────
+// ─── Constants ──────────────────────────────────────────────────
 
 const ZOOM_IN_FACTOR = 1.35;
 const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
@@ -712,7 +712,10 @@ export default function App() {
     });
 
     return () => cancelAnimationFrame(raf);
-  }, [selectedId, selectedGeneralId, showDepartmentPanel, byId]);
+    // byId намеренно НЕ в зависимостях: перетаскивание узла меняет координаты
+    // и ссылку byId, из-за чего эффект перезапускался и вызывал fit(true) —
+    // экран «отъезжал» после каждого drag. byId доступен внутри через замыкание.
+  }, [selectedId, selectedGeneralId, showDepartmentPanel]);
 
   // ─── Фильтрация по подразделениям ──────────────────────────────
 
