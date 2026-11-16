@@ -4,7 +4,7 @@ import { TIER_LABEL } from "../../data/tree";
 import type { NodePatch } from "../../state/useTreeData";
 import type { ImportResult } from "../../lib/excel";
 import { TEMPLATE_HEADERS, downloadTemplate, parseWorkbook } from "../../lib/excel";
-import { uploadLogo } from "../../lib/supabase";
+import { saveLogoToGitHub } from "../../lib/github";
 
 // ─── Constants ──────────────────────────────────────────────────
 
@@ -379,19 +379,22 @@ function NodeEditor({ node, onSave, onSaveGeneral, onUpdateCompany }: NodeEditor
     const file = e.target.files?.[0];
     if (!file) return;
 
+    if (!file.type.startsWith("image/")) {
+      alert("Пожалуйста, выберите файл изображения");
+      return;
+    }
+
     setUploading(true);
     try {
-      const result = await uploadLogo(file);
-      if (result.success && result.url) {
-        setLogo(result.url);
-        if (isCompany) {
-          onUpdateCompany({ logo: result.url });
-        }
-      } else {
-        alert(result.error || "Не удалось загрузить логотип");
+      // saveLogoToGitHub возвращает строку data URL (base64), которую можно сразу использовать в img src
+      const dataUrl = await saveLogoToGitHub(file);
+      setLogo(dataUrl);
+      if (isCompany) {
+        onUpdateCompany({ logo: dataUrl });
       }
-    } catch {
-      alert("Произошла ошибка при загрузке логотипа");
+    } catch (err) {
+      console.error("Logo upload error:", err);
+      alert("Не удалось загрузить логотип в GitHub. Проверьте консоль или наличие VITE_GITHUB_TOKEN.");
     } finally {
       setUploading(false);
     }
