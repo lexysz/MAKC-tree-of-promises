@@ -50,6 +50,13 @@ export interface GeneralPromiseDef {
   who: string;
   toWhom?: string;
   metrics?: string;
+  /**
+   * Поддерживающие обещания общего обещания — база для будущего «проваливания»
+   * из карточки общего в поддерживающее. На дереве пока не отображаются
+   * (buildGraph общие обещания не обходит). Структура цепочки та же, что у
+   * корневого обещания: вложенный массив SupportDef.
+   */
+  supports?: SupportDef[];
 }
 
 export interface TreeData {
