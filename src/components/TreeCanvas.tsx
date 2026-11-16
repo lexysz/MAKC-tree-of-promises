@@ -775,7 +775,6 @@ function Tooltip({ node, view }: { node: GraphNode; view: ViewState }) {
       </div>
       <div className="mt-0.5 pl-4 text-[10.5px] font-medium uppercase tracking-[0.14em] text-mist-500">
         {tierLabel}
-        <span className="normal-case tracking-normal"> · клик — карточка</span>
       </div>
     </div>
   );
