@@ -6,6 +6,20 @@ const TREE_PATH = "src/data/tree.json";
 const LOGO_PATH = "src/assets/company-logo.png";
 const TOKEN = import.meta.env.VITE_GITHUB_TOKEN;
 
+// base64 <-> UTF-8: atob/btoa работают только с latin1, кириллицу ломают.
+function decodeBase64Utf8(base64: string): string {
+  const binary = atob(base64);
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
+function encodeBase64Utf8(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
 if (!TOKEN) {
   throw new Error(
     "Отсутствует переменная окружения VITE_GITHUB_TOKEN. " +
@@ -61,13 +75,13 @@ async function putFile(
 export async function loadTreeFromGitHub(): Promise<TreeData | null> {
   const file = await getFile(TREE_PATH);
   if (!file) return null;
-  const json = atob(file.content);
+   const json = decodeBase64Utf8(file.content);
   return JSON.parse(json) as TreeData;
 }
 
 export async function saveTreeToGitHub(data: TreeData): Promise<void> {
   const file = await getFile(TREE_PATH);
-  const content = btoa(JSON.stringify(data, null, 2));
+  const content = encodeBase64Utf8(JSON.stringify(data, null, 2));
   const message = `Update tree data ${new Date().toISOString()}`;
   await putFile(TREE_PATH, content, file?.sha ?? "", message);
 }
