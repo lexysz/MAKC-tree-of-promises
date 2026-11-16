@@ -6,7 +6,6 @@ import {
 } from "../lib/github";
 import type { TreeData } from "../data/tree";
 import { createEmptyTree } from "../data/tree";
-import { pruneExtraParentIds, reassignColors, sanitizeTree } from "../data/tree";
 
 const STORAGE_KEY = "makc-tree-data";
 
@@ -16,9 +15,8 @@ function loadFromStorage(): TreeData | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return pruneExtraParentIds(
-      reassignColors(sanitizeTree(JSON.parse(raw) as TreeData))
-    );
+    // Прямой парсинг без дополнительных утилит, которых нет в tree.ts
+    return JSON.parse(raw) as TreeData;
   } catch {
     return null;
   }
@@ -84,10 +82,12 @@ export function useTreeData() {
     };
   }, []);
 
-  const updateNode = (nodeId: string, updates: Partial<TreeData["values"][0]["promises"][0]>) => {
+  const updateNode = (nodeId: string, updates: any) => {
     setData((prev) => {
+      // Глубокое копирование для иммутабельности
       const newData = JSON.parse(JSON.stringify(prev)) as TreeData;
-      // Находим узел и обновляем (упрощённо — полный перебор)
+      
+      // Ищем и обновляем узел (упрощённый обход, достаточный для текущей структуры)
       for (const value of newData.values) {
         for (const promise of value.promises) {
           if (promise.id === nodeId) {
@@ -104,6 +104,7 @@ export function useTreeData() {
           }
         }
       }
+      
       saveToStorage(newData);
       setModified(true);
       return newData;
@@ -122,7 +123,7 @@ export function useTreeData() {
     });
   };
 
-  const updateGeneralPromise = (id: string, updates: Partial<TreeData["generalPromises"][0]>) => {
+  const updateGeneralPromise = (id: string, updates: any) => {
     setData((prev) => {
       const newData = JSON.parse(JSON.stringify(prev)) as TreeData;
       const idx = newData.generalPromises.findIndex((p) => p.id === id);
