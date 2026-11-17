@@ -51,10 +51,10 @@ export interface GeneralPromiseDef {
   toWhom?: string;
   metrics?: string;
   /**
-   * Поддерживающие обещания общего обещания — база для будущего «проваливания»
-   * из карточки общего в поддерживающее. На дереве пока не отображаются
-   * (buildGraph общие обещания не обходит). Структура цепочки та же, что у
-   * корневого обещания: вложенный массив SupportDef.
+   * Поддерживающие обещания общего обещания. На дереве не отображаются
+   * (buildGraph общие обещания не обходит); показываются аккордеоном
+   * в карточке общего и read-only в админке. Структура цепочки та же,
+   * что у корневого: вложенный массив SupportDef.
    */
   supports?: SupportDef[];
 }
@@ -135,7 +135,8 @@ export function findSupportByTitle(
   return null;
 }
 
-function findSupportInSupports(
+/** Рекурсивный поиск supporting внутри массива supporting (任意 уровень). */
+export function findSupportInSupports(
   supports: SupportDef[] | undefined,
   title: string
 ): SupportDef | null {
@@ -145,6 +146,38 @@ function findSupportInSupports(
   for (const support of supports) {
     if (support.title.trim().toLowerCase() === normalizedTitle) return support;
     const found = findSupportInSupports(support.supports, title);
+    if (found) return found;
+  }
+  return null;
+}
+
+/** Поиск общего обещания по названию (нормализованному). */
+export function findGeneralByTitle(
+  generals: GeneralPromiseDef[] | undefined,
+  title: string
+): GeneralPromiseDef | null {
+  if (!generals || !title) return null;
+  const normalizedTitle = title.trim().toLowerCase();
+  for (const g of generals) {
+    if (g.title.trim().toLowerCase() === normalizedTitle) return g;
+  }
+  return null;
+}
+
+/**
+ * Поиск supporting «везде»: под корневыми обещаниями ценностей И под общими
+ * обещаниями (рекурсивно). Нужен, чтобы цепочки «общее → supporting → supporting»
+ * находили родителя на любом уровне.
+ */
+export function findSupportAnywhere(
+  values: ValueDef[],
+  generals: GeneralPromiseDef[] | undefined,
+  title: string
+): SupportDef | null {
+  const viaRoots = findSupportByTitle(values, title);
+  if (viaRoots) return viaRoots;
+  for (const g of generals ?? []) {
+    const found = findSupportInSupports(g.supports, title);
     if (found) return found;
   }
   return null;
