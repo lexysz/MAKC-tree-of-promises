@@ -208,8 +208,6 @@ function detectMainHeader(rows: unknown[][]): HeaderDetection | null {
     });
 
     // Колонки метрик разбираем отдельно: заголовки могут совпадать («Метрики»).
-    // Явная привязка по словам «корнев»/«поддерж», иначе — по позиции
-    // относительно колонки поддерживающего обещания.
     const supportIdx = map.support;
     row.forEach((cell, idx) => {
       const h = normHeader(cellStr(cell));
@@ -224,8 +222,6 @@ function detectMainHeader(rows: unknown[][]): HeaderDetection | null {
         return;
       }
 
-      // Просто «Метрики»: до колонки поддерживающего — метрики корневого,
-      // после — метрики поддерживающего.
       if (supportIdx !== undefined) {
         if (idx < supportIdx) {
           if (!("rootMetrics" in map)) map.rootMetrics = idx;
@@ -239,7 +235,9 @@ function detectMainHeader(rows: unknown[][]): HeaderDetection | null {
       }
     });
 
-    if (Object.keys(map).length >= 3) {
+    // Главный лист обязан иметь ценность + корневое + поддерживающее.
+    // Это отсекает листы «Общие» и «Цепочки» от误 распознавания как главного.
+    if (map.value !== undefined && map.root !== undefined && map.support !== undefined) {
       return { headerIdx: i, columnMap: map };
     }
   }
@@ -326,16 +324,25 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   const XLSX = await loadXLSX();
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: "array" });
-  const sheetName = workbook.SheetNames[0];
-  const rows = await readRows(workbook, sheetName);
+
+  // Читаем все листы один раз и выбираем их ПО СОДЕРЖИМОМУ (заголовкам),
+  // а не по имени/порядку — иначе новые имена листов ломают импорт.
+  const sheetNames = workbook.SheetNames;
+  const rowsBySheet = new Map<string, unknown[][]>();
+  for (const name of sheetNames) {
+    rowsBySheet.set(name, await readRows(workbook, name));
+  }
+
+  const mainSheet =
+    sheetNames.find((n) => detectMainHeader(rowsBySheet.get(n)!) !== null) ?? sheetNames[0];
+  const sheetName = mainSheet;
+  const rows = rowsBySheet.get(sheetName)!;
 
   const warnings: string[] = [];
   const valuesMap = new Map<string, ValueDef>();
   const rootsMap = new Map<string, RootDef>();
   const rootToValue = new Map<string, string>();
-  // Домашний корень каждого поддерживающего (для отличия продолжения строки от связи)
   const supportHome = new Map<string, string>();
-  // Последнее поддерживающее текущего корневого (для строк-продолжений с метриками)
   const lastSupportByRoot = new Map<string, SupportDef>();
   const stats = { rows: 0, values: 0, roots: 0, supports: 0, general: 0, chains: 0 };
 
@@ -345,7 +352,6 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   }
   const { headerIdx, columnMap } = headerDetection;
 
-  // Наследование значений для объединённых ячеек
   const carry = { whoRoot: "", toWhomRoot: "", value: "", root: "" };
 
   for (let i = headerIdx + 1; i < rows.length; i++) {
@@ -446,12 +452,10 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
       }
     }
 
-    // Метрики корневого: могут приходить несколькими строками — накапливаем списком
     if (rawRootMetrics) {
       root.metrics = appendMetric(root.metrics, rawRootMetrics);
     }
 
-    // Поддерживающее обещание: ищем только в пределах текущей ценности
     let currentSupport: SupportDef | null = null;
 
     if (supportTitle) {
@@ -460,8 +464,6 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
       if (existingSupport) {
         currentSupport = existingSupport;
         const homeRootId = supportHome.get(existingSupport.id);
-        // Повтор того же названия под ДРУГИМ корневым той же ценности — доп. связь.
-        // Повтор под тем же корневым — строка-продолжение (например, вторая метрика).
         if (homeRootId !== root.id && !existingSupport.extraParentIds?.includes(root.id)) {
           if (!existingSupport.extraParentIds) existingSupport.extraParentIds = [];
           existingSupport.extraParentIds.push(root.id);
@@ -483,8 +485,6 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         stats.supports++;
       }
     } else {
-      // Ячейка поддерживающего пуста (слитые ячейки): строка-продолжение
-      // последнего поддерживающего текущего корневого.
       currentSupport = lastSupportByRoot.get(root.id) ?? null;
     }
 
@@ -492,38 +492,22 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
       lastSupportByRoot.set(root.id, currentSupport);
       if (whoSupport && !currentSupport.who) currentSupport.who = whoSupport;
       if (toWhomSupport && !currentSupport.toWhom) currentSupport.toWhom = toWhomSupport;
-      // Метрики поддерживающего: накапливаем списком
       if (rawSupportMetrics) {
         currentSupport.metrics = appendMetric(currentSupport.metrics, rawSupportMetrics);
       }
     }
   }
 
-  // ─── Общие обещания: ищем второй лист (по имени или по заголовкам) ───
+  // ─── Общие обещания: лист выбираем по заголовкам ───
 
   const generalPromises: GeneralPromiseDef[] = [];
 
-  let generalSheetName: string | null =
-    workbook.SheetNames.find((n) => n !== sheetName && n.toLowerCase().includes("общ")) ?? null;
-  let generalHeader: GeneralHeaderDetection | null = null;
-  if (generalSheetName) {
-    generalHeader = detectGeneralHeader(await readRows(workbook, generalSheetName));
-  }
-
-  if (!generalHeader) {
-    for (const name of workbook.SheetNames) {
-      if (name === sheetName) continue;
-      const detected = detectGeneralHeader(await readRows(workbook, name));
-      if (detected) {
-        generalSheetName = name;
-        generalHeader = detected;
-        break;
-      }
-    }
-  }
+  const generalSheetName =
+    sheetNames.find((n) => n !== sheetName && detectGeneralHeader(rowsBySheet.get(n)!) !== null) ?? null;
+  const generalHeader = generalSheetName ? detectGeneralHeader(rowsBySheet.get(generalSheetName)!) : null;
 
   if (generalSheetName && generalHeader) {
-    const generalRows = await readRows(workbook, generalSheetName);
+    const generalRows = rowsBySheet.get(generalSheetName)!;
     const { columnMap: gMap } = generalHeader;
 
     const getGeneral = (row: unknown[], key: GeneralFieldKey): string => {
@@ -560,32 +544,16 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
     }
   }
 
-  // ─── Цепочки поддерживающих: ищем третий лист ───
-  // Родителем может быть поддерживающее (под корневым ИЛИ под общим)
-  // или общее обещание. Если название совпадает и там, и там —
-  // дочернее привязывается к ОБОИМ (решение: выводим для обоих).
+  // ─── Цепочки: лист выбираем по заголовкам (не главный и не общие) ───
 
-  let chainSheetName: string | null =
-    workbook.SheetNames.find((n) => n.toLowerCase().includes("цепочк") || (n.toLowerCase().includes("поддерж") && !n.toLowerCase().includes("общ"))) ?? null;
-  let chainHeader: ChainHeaderDetection | null = null;
-  if (chainSheetName) {
-    chainHeader = detectChainHeader(await readRows(workbook, chainSheetName));
-  }
-
-  if (!chainHeader) {
-    for (const name of workbook.SheetNames) {
-      if (name === sheetName || name === generalSheetName) continue;
-      const detected = detectChainHeader(await readRows(workbook, name));
-      if (detected) {
-        chainSheetName = name;
-        chainHeader = detected;
-        break;
-      }
-    }
-  }
+  const chainSheetName =
+    sheetNames.find(
+      (n) => n !== sheetName && n !== generalSheetName && detectChainHeader(rowsBySheet.get(n)!) !== null,
+    ) ?? null;
+  const chainHeader = chainSheetName ? detectChainHeader(rowsBySheet.get(chainSheetName)!) : null;
 
   if (chainSheetName && chainHeader) {
-    const chainRows = await readRows(workbook, chainSheetName);
+    const chainRows = rowsBySheet.get(chainSheetName)!;
     const { columnMap: cMap } = chainHeader;
 
     const getChain = (row: unknown[], key: ChainFieldKey): string => {
@@ -626,8 +594,6 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
       const childMetrics = getChain(row, "metrics") || undefined;
       let attached = false;
 
-      // Ветка supporting-родителя: линейная цепочка (один ребёнок на родителя),
-      // как и раньше — обратная совместимость.
       if (supportMatch) {
         if (supportMatch.supports && supportMatch.supports.length > 0) {
           warnings.push(
@@ -651,8 +617,6 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         }
       }
 
-      // Ветка общего-родителя: список нескольких прямых поддерживающих,
-      // дедупликация по названию.
       if (generalMatch) {
         if (!generalMatch.supports) generalMatch.supports = [];
         if (generalMatch.supports.some((s) => s.title === childTitle)) {
