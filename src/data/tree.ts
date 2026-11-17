@@ -118,7 +118,6 @@ export type NodeDepth = 0 | 1 | 2 | 3 | 4;
  * Толерантная нормализация названий для сопоставления строк Excel:
  * unify типографских дефисов (U+2010..U+2015, минус) к '-',
  * неразрывных/узких пробелов к обычному, схлопывание пробелов, trim, lower.
- * Благодаря этому «профит‑тесты» (U+2011) и «профит-тесты» считаются одним названием.
  */
 export function normalizeTitle(s: string): string {
   return s
@@ -131,7 +130,7 @@ export function normalizeTitle(s: string): string {
 
 /**
  * Рекурсивно ищет SupportDef по title во всех уровнях вложенности supports.
- * Используется при связывании цепочек из Excel без ID.
+ * Принимает именно КОРНЕВЫЕ обещания (RootDef[]), у которых есть .supports.
  */
 export function findSupportByTitle(
   roots: RootDef[] | undefined,
@@ -180,17 +179,24 @@ export function findGeneralByTitle(
 }
 
 /**
- * Поиск supporting «везде»: под корневыми обещаниями ценностей И под общими
- * обещаниями (рекурсивно). Нужен, чтобы цепочки «общее → supporting → supporting»
- * находили родителя на любом уровне.
+ * Поиск supporting «везде»: под корневыми обещаниями КАЖДОЙ ценности
+ * (ценность → .promises → .supports, рекурсивно) И под общими обещаниями.
+ *
+ * ВАЖНО: раньше сюда ошибочно передавался весь массив ценностей в
+ * findSupportByTitle (который ждёт RootDef[] и читает .supports) —
+ * у ценности поле называется .promises, поэтому поиск по корневым
+ * всегда был пустым и все строки «Цепочек» с родителем-поддерживающим
+ * не находились. Теперь обходим ценности → их promises корректно.
  */
 export function findSupportAnywhere(
   values: ValueDef[],
   generals: GeneralPromiseDef[] | undefined,
   title: string
 ): SupportDef | null {
-  const viaRoots = findSupportByTitle(values, title);
-  if (viaRoots) return viaRoots;
+  for (const value of values) {
+    const viaRoots = findSupportByTitle(value.promises, title);
+    if (viaRoots) return viaRoots;
+  }
   for (const g of generals ?? []) {
     const found = findSupportInSupports(g.supports, title);
     if (found) return found;
