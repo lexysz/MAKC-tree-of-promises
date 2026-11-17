@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { GraphNode } from "../lib/layout";
 import type { GeneralPromiseDef } from "../data/tree";
+import GeneralSupportsAccordion from "./GeneralSupportsAccordion";
 import { TIER_LABEL } from "../data/tree";
 import { parseDepartments } from "../lib/departments";
 
@@ -40,7 +41,7 @@ interface Props {
   onBackToCompany: () => void;
 }
 
-// ─── Icons ──────────────────────────────────────────────────────
+// ─── Icons ───────────────────────────────────────────────────────
 
 function CloseIcon() {
   return (
@@ -471,6 +472,19 @@ function GeneralPromiseCard({
           {promise.toWhom && <MetaRow label="Кому" value={promise.toWhom} color={CORE_COLOR} />}
           {promise.metrics && <MetaRow label="Метрики" value={promise.metrics} color={CORE_COLOR} />}
         </dl>
+
+        {/* Поддерживающие обещания общего: аккордеон с вложенными цепочками */}
+        {promise.supports && promise.supports.length > 0 && (
+          <div className="mt-6 border-t border-ink-700/60 pt-5">
+            <div className="mb-3 flex items-baseline justify-between">
+              <span className="text-[10.5px] font-semibold uppercase tracking-[0.18em] text-mist-500">
+                Поддерживающие обещания
+              </span>
+              <span className="text-[11px] text-mist-500">{promise.supports.length}</span>
+            </div>
+            <GeneralSupportsAccordion supports={promise.supports} />
+          </div>
+        )}
       </div>
 
       <div className="flex shrink-0 items-center justify-between gap-3 border-t border-ink-700/60 px-6 py-3.5">
