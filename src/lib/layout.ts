@@ -1,4 +1,4 @@
-import type { CompanyDef, Tier, ValueDef, SupportDef } from "../data/tree";
+import type { CompanyDef, Tier, ValueDef, RootDef, SupportDef } from "../data/tree";
 
 export interface GraphNode {
   id: string;
@@ -47,6 +47,10 @@ export const NODE_R: Record<Tier, number> = {
 
 const CORE_COLOR = "#8fb6c0";
 const NODE_GAP = 100;
+// Минимальное физическое расстояние между двумя supporting на одном кольце.
+const SUPPORT_MIN_SPACING = 2 * NODE_R.support + NODE_GAP;
+// Радиальный зазор между уровнями цепочки (больше диаметра support + gap).
+const SUPPORT_LEVEL_STEP = 2 * NODE_R.support + NODE_GAP + 40;
 
 function minRingRadius(n: number, r: number): number {
   if (n <= 1) return r + 60;
@@ -54,19 +58,14 @@ function minRingRadius(n: number, r: number): number {
 }
 
 function trimmed(
-  x1: number,
-  y1: number,
-  r1: number,
-  x2: number,
-  y2: number,
-  r2: number,
+  x1: number, y1: number, r1: number,
+  x2: number, y2: number, r2: number,
 ): [number, number, number, number] {
   const dx = x2 - x1;
   const dy = y2 - y1;
   const d = Math.hypot(dx, dy) || 1;
   const ux = dx / d;
   const uy = dy / d;
-
   return [
     x1 + ux * (r1 + 4),
     y1 + uy * (r1 + 4),
@@ -75,40 +74,62 @@ function trimmed(
   ];
 }
 
-/**
- * Подсчитывает общее количество поддерживающих обещаний всех уровней вложенности.
- */
-function countAllSupports(values: ValueDef[]): number {
-  const countSupport = (supports: SupportDef[]): number => {
-    return supports.reduce((sum, s) => sum + 1 + countSupport(s.supports ?? []), 0);
-  };
+/** Число листьев поддерева supporting (лист = 1). Используется для угловых интервалов. */
+function supportLeaves(s: SupportDef): number {
+  const kids = s.supports ?? [];
+  if (kids.length === 0) return 1;
+  return kids.reduce((acc, k) => acc + supportLeaves(k), 0);
+}
 
-  return values.reduce((sum, v) => {
-    return sum + v.promises.reduce((sum2, r) => sum2 + countSupport(r.supports ?? []), 0);
-  }, 0);
+function rootLeaves(r: RootDef): number {
+  return (r.supports ?? []).reduce((acc, s) => acc + supportLeaves(s), 0);
+}
+
+interface SupportCtx {
+  familyId: string;
+  familyTitle: string;
+  color: string;
+  valueIdx: number;
+  rootIdx: number;
 }
 
 export function buildGraph(
   company: CompanyDef,
   values: ValueDef[],
   customPositions?: Record<string, { x: number; y: number }>,
-): {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  bounds: GraphBounds;
-} {
+): { nodes: GraphNode[]; edges: GraphEdge[]; bounds: GraphBounds } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const nodeIds = new Set<string>();
 
   const totalRoots = values.reduce((sum, v) => sum + v.promises.length, 0);
-  const totalSupports = countAllSupports(values);
+  const totalSupportLeaves = values.reduce(
+    (sum, v) => sum + v.promises.reduce((s2, r) => s2 + rootLeaves(r), 0),
+    0,
+  );
 
-  const scaleFactor = Math.max(1, Math.sqrt(values.length + totalRoots + totalSupports) / 5);
+  const scaleFactor = Math.max(1, Math.sqrt(values.length + totalRoots + totalSupportLeaves) / 5);
   const valueRingR = Math.max(1050, minRingRadius(values.length, NODE_R.value));
   const rootRingR = Math.max(valueRingR + 900 * scaleFactor, minRingRadius(totalRoots, NODE_R.root));
-  const supportRingR = Math.max(rootRingR + 840 * scaleFactor, minRingRadius(totalSupports, NODE_R.support));
-  const support2RingR = supportRingR + 600 * scaleFactor;
+
+  // Радиус первого кольца supporting: достаточно места для всех листьев
+  // И для самого «узкого» сектора корня (чтобы листовой интервал физически помещался).
+  let supportRingR = Math.max(
+    rootRingR + 840 * scaleFactor,
+    minRingRadius(totalSupportLeaves, NODE_R.support),
+  );
+  const valueAngleStep = (2 * Math.PI) / Math.max(1, values.length);
+  values.forEach((value) => {
+    const rootCount = value.promises.length;
+    if (rootCount === 0) return;
+    const rootSector = valueAngleStep / rootCount;
+    value.promises.forEach((root) => {
+      const leaves = rootLeaves(root);
+      if (leaves > 0) {
+        supportRingR = Math.max(supportRingR, (SUPPORT_MIN_SPACING * leaves) / rootSector);
+      }
+    });
+  });
 
   if (!nodeIds.has(company.id)) {
     nodeIds.add(company.id);
@@ -122,15 +143,66 @@ export function buildGraph(
       familyId: "core",
       familyTitle: company.title,
       color: CORE_COLOR,
-      x: 0,
-      y: 0,
+      x: 0, y: 0,
       r: NODE_R.company,
       delay: 0.05,
       childrenIds: values.map((v) => v.id),
     });
   }
 
-  const valueAngleStep = (2 * Math.PI) / values.length;
+  /**
+   * Радиальная tidy-раскладка поддерева supporting.
+   * Интервал [start, start+width) выделяется пропорционально числу листьев,
+   * узел ставится в центр своего интервала на кольцо глубины depth,
+   * дети делят интервал родителя пропорционально своим листьям.
+   * Интервалы веток не пересекаются ни на какой глубине → нет запутывания.
+   */
+  const placeSupport = (
+    sup: SupportDef,
+    start: number,
+    width: number,
+    depth: number,
+    parentId: string,
+    ctx: SupportCtx,
+  ): void => {
+    const angle = start + width / 2;
+    const radius = supportRingR + depth * SUPPORT_LEVEL_STEP;
+    const sx = Math.cos(angle) * radius;
+    const sy = Math.sin(angle) * radius;
+
+    if (!nodeIds.has(sup.id)) {
+      nodeIds.add(sup.id);
+      nodes.push({
+        id: sup.id,
+        tier: "support",
+        title: sup.title,
+        short: "",
+        description: sup.description,
+        parentId,
+        familyId: ctx.familyId,
+        familyTitle: ctx.familyTitle,
+        color: ctx.color,
+        x: sx, y: sy,
+        r: NODE_R.support,
+        delay: 0.95 + ctx.valueIdx * 0.05 + ctx.rootIdx * 0.04 + depth * 0.06,
+        childrenIds: sup.supports?.map((s) => s.id) ?? [],
+        who: sup.who,
+        toWhom: sup.toWhom,
+        metrics: sup.metrics,
+        extraParentIds: sup.extraParentIds,
+      });
+    }
+
+    const kids = sup.supports ?? [];
+    if (kids.length === 0) return;
+    const total = kids.reduce((acc, k) => acc + supportLeaves(k), 0);
+    let cursor = start;
+    for (const kid of kids) {
+      const kidWidth = width * (supportLeaves(kid) / total);
+      placeSupport(kid, cursor, kidWidth, depth + 1, sup.id, ctx);
+      cursor += kidWidth;
+    }
+  };
 
   values.forEach((value, i) => {
     const valueAngle = -Math.PI / 2 + valueAngleStep * i;
@@ -149,8 +221,7 @@ export function buildGraph(
         familyId: value.id,
         familyTitle: value.title,
         color: value.color,
-        x: vx,
-        y: vy,
+        x: vx, y: vy,
         r: NODE_R.value,
         delay: 0.18 + i * 0.07,
         childrenIds: value.promises.map((p) => p.id),
@@ -159,12 +230,10 @@ export function buildGraph(
 
     const rootCount = value.promises.length;
     if (rootCount === 0) return;
-
-    const sectorWidth = valueAngleStep;
-    const rootStep = sectorWidth / rootCount;
+    const rootStep = valueAngleStep / rootCount;
 
     value.promises.forEach((root, j) => {
-      const rootAngle = valueAngle - sectorWidth / 2 + rootStep * (j + 0.5);
+      const rootAngle = valueAngle - valueAngleStep / 2 + rootStep * (j + 0.5);
       const rx = Math.cos(rootAngle) * rootRingR;
       const ry = Math.sin(rootAngle) * rootRingR;
 
@@ -180,8 +249,7 @@ export function buildGraph(
           familyId: value.id,
           familyTitle: value.title,
           color: value.color,
-          x: rx,
-          y: ry,
+          x: rx, y: ry,
           r: NODE_R.root,
           delay: 0.55 + i * 0.06 + j * 0.05,
           childrenIds: root.supports.map((s) => s.id),
@@ -191,65 +259,35 @@ export function buildGraph(
         });
       }
 
-      processSupports(
-        root.supports ?? [],
-        root.id,
-        rootAngle,
-        rootStep,
-        value.id,
-        value.title,
-        value.color,
-        i,
-        j,
-        supportRingR,
-        support2RingR,
-        nodes,
-        nodeIds,
-        0
-      );
+      const ctx: SupportCtx = {
+        familyId: value.id,
+        familyTitle: value.title,
+        color: value.color,
+        valueIdx: i,
+        rootIdx: j,
+      };
+      const supports = root.supports ?? [];
+      const total = supports.reduce((acc, s) => acc + supportLeaves(s), 0);
+      if (total === 0) return;
+      let cursor = rootAngle - rootStep / 2;
+      for (const sup of supports) {
+        const w = rootStep * (supportLeaves(sup) / total);
+        placeSupport(sup, cursor, w, 0, root.id, ctx);
+        cursor += w;
+      }
     });
   });
 
-  resolveOverlaps(nodes, valueRingR, rootRingR, supportRingR);
+  // Перекрытия разрешаем только для ценностей/корневых; supporting уже
+  // разведены интервалами и кольцами — трогать их нельзя (иначе пересечения).
+  resolveOverlaps(nodes, ["value", "root"]);
 
-  // ─── Обработка общих поддерживающих с несколькими родителями ──────
-  // Узел остаётся один, но перемещается на усреднённый угол между всеми
-  // его родителями. childrenIds дополнительных родителей пополняются этим узлом.
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
+  // Доп. связи: пополняем childrenIds дополнительных родителей, но НЕ переселяем
+  // сам узел (переселение после раскладки детей рвало рёбра и путало ветки).
   for (const node of nodes) {
-    if (node.tier !== "support" || !node.extraParentIds || node.extraParentIds.length === 0) continue;
-
-    const allParentIds = [node.parentId, ...node.extraParentIds].filter((id): id is string => Boolean(id));
-    const parentAngles: number[] = [];
-
-    for (const pid of allParentIds) {
-      const parent = nodeMap.get(pid);
-      if (parent) parentAngles.push(Math.atan2(parent.y, parent.x));
-    }
-
-    if (parentAngles.length < 2) continue;
-
-     // Дети узла не должны содержать повторов (защита от накопления дублей
-  // при переносах корней между ценностями и доп. связями).
-  for (const n of nodes) {
-    n.childrenIds = Array.from(new Set(n.childrenIds));
-  }
-
-    // Усреднённый угол через сумму единичных векторов — корректно работает
-    // даже когда родители находятся по разные стороны от центра (стык -180/+180)
-    let sumX = 0, sumY = 0;
-    for (const a of parentAngles) {
-      sumX += Math.cos(a);
-      sumY += Math.sin(a);
-    }
-    const avgAngle = Math.atan2(sumY, sumX);
-
-    const r = Math.hypot(node.x, node.y);
-    node.x = Math.cos(avgAngle) * r;
-    node.y = Math.sin(avgAngle) * r;
-
-    // Добавляем этот узел в childrenIds дополнительных родителей
+    if (node.tier !== "support" || !node.extraParentIds) continue;
     for (const pid of node.extraParentIds) {
       const extraParent = nodeMap.get(pid);
       if (extraParent && !extraParent.childrenIds.includes(node.id)) {
@@ -258,49 +296,45 @@ export function buildGraph(
     }
   }
 
-  // Apply custom positions if provided
+  // Дети без повторов (защита от накопления дублей).
+  for (const n of nodes) {
+    n.childrenIds = Array.from(new Set(n.childrenIds));
+  }
+
   if (customPositions) {
     for (const node of nodes) {
       const pos = customPositions[node.id];
-      if (pos) {
-        node.x = pos.x;
-        node.y = pos.y;
-      }
+      if (pos) { node.x = pos.x; node.y = pos.y; }
     }
   }
 
-  // Build edges
   nodes.forEach((node) => {
     if (node.parentId) {
       const parent = nodeMap.get(node.parentId);
       if (parent) {
         const [x1, y1, x2, y2] = trimmed(parent.x, parent.y, parent.r, node.x, node.y, node.r);
-        const d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`;
         edges.push({
           id: `e-${parent.id}-${node.id}`,
           from: parent.id,
           to: node.id,
           color: node.tier === "value" ? CORE_COLOR : node.color,
-          d,
+          d: `M ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`,
           delay: node.delay - 0.1,
         });
       }
     }
-
-    // Дополнительные рёбра для extraParentIds
     if (node.extraParentIds) {
       for (const extraPid of node.extraParentIds) {
         if (extraPid === node.parentId) continue;
         const extraParent = nodeMap.get(extraPid);
         if (extraParent) {
           const [x1, y1, x2, y2] = trimmed(extraParent.x, extraParent.y, extraParent.r, node.x, node.y, node.r);
-          const d = `M ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`;
           edges.push({
             id: `e-${extraPid}-${node.id}`,
             from: extraPid,
             to: node.id,
             color: node.color,
-            d,
+            d: `M ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`,
             delay: node.delay - 0.1,
           });
         }
@@ -308,12 +342,7 @@ export function buildGraph(
     }
   });
 
-  // Calculate bounds
-  let minX = Infinity;
-  let minY = Infinity;
-  let maxX = -Infinity;
-  let maxY = -Infinity;
-
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const nd of nodes) {
     minX = Math.min(minX, nd.x - nd.r - 90);
     minY = Math.min(minY, nd.y - nd.r - 90);
@@ -324,91 +353,6 @@ export function buildGraph(
   return { nodes, edges, bounds: { minX, minY, maxX, maxY } };
 }
 
-/**
- * Рекурсивно обрабатывает поддерживающие обещания и их вложенные уровни.
- * depth: 0 = первый уровень (от корневого), 1 = второй уровень (от поддерживающего)
- */
-function processSupports(
-  supports: SupportDef[],
-  parentId: string,
-  parentAngle: number,
-  parentStep: number,
-  familyId: string,
-  familyTitle: string,
-  color: string,
-  valueIdx: number,
-  rootIdx: number,
-  ringR: number,
-  ringR2: number,
-  nodes: GraphNode[],
-  nodeIds: Set<string>,
-  depth: number
-): void {
-  if (supports.length === 0) return;
-
-  const supportCount = supports.length;
-  const subSectorWidth = parentStep;
-  const supportStep = subSectorWidth / supportCount;
-
-  // Каждому уровню вложенности цепочки — своё кольцо радиуса.
-  // Раньше depth >= 1 все сидели на одном ringR2 и дочерний support
-  // ложился в одну точку с родителем (пересечение/наложение).
-  // depth 0 -> ringR, depth 1 -> ringR2 (как было), дальше — расходятся наружу.
-  const levelStep = ringR2 - ringR;
-  const levelR = depth === 0 ? ringR : ringR + depth * levelStep;
-
-  supports.forEach((sup, t) => {
-    const supportAngle = parentAngle - subSectorWidth / 2 + supportStep * (t + 0.5);
-    const sx = Math.cos(supportAngle) * levelR;
-    const sy = Math.sin(supportAngle) * levelR;
-
-    if (!nodeIds.has(sup.id)) {
-      nodeIds.add(sup.id);
-      nodes.push({
-        id: sup.id,
-        tier: "support",
-        title: sup.title,
-        short: "",
-        description: sup.description,
-        parentId,
-        familyId,
-        familyTitle,
-        color,
-        x: sx,
-        y: sy,
-        r: NODE_R.support,
-        delay: depth === 0
-          ? 0.95 + valueIdx * 0.05 + rootIdx * 0.04 + t * 0.045
-          : 1.25 + valueIdx * 0.05 + rootIdx * 0.04 + t * 0.045,
-        childrenIds: sup.supports?.map((s) => s.id) ?? [],
-        who: sup.who,
-        toWhom: sup.toWhom,
-        metrics: sup.metrics,
-        extraParentIds: sup.extraParentIds,
-      });
-    }
-
-    if (depth < 4 && sup.supports && sup.supports.length > 0) {
-      processSupports(
-        sup.supports,
-        sup.id,
-        supportAngle,
-        supportStep,
-        familyId,
-        familyTitle,
-        color,
-        valueIdx,
-        rootIdx,
-        ringR,
-        ringR2,
-        nodes,
-        nodeIds,
-        depth + 1
-      );
-    }
-  });
-}
-
 export function collectFamily(id: string, byId: Map<string, GraphNode>): Set<string> {
   const result = new Set<string>();
   const node = byId.get(id);
@@ -416,7 +360,6 @@ export function collectFamily(id: string, byId: Map<string, GraphNode>): Set<str
 
   result.add(id);
 
-  // Add all descendants
   const queue = [...node.childrenIds];
   while (queue.length > 0) {
     const childId = queue.shift()!;
@@ -426,11 +369,9 @@ export function collectFamily(id: string, byId: Map<string, GraphNode>): Set<str
     if (child) queue.push(...child.childrenIds);
   }
 
-  // Add parent chain: обходим ВСЕХ родителей (основного и дополнительных)
   const parentQueue: string[] = [];
   if (node.parentId) parentQueue.push(node.parentId);
   if (node.extraParentIds) parentQueue.push(...node.extraParentIds);
-
   while (parentQueue.length > 0) {
     const pid = parentQueue.shift()!;
     if (result.has(pid)) continue;
@@ -444,14 +385,7 @@ export function collectFamily(id: string, byId: Map<string, GraphNode>): Set<str
   return result;
 }
 
-function resolveOverlaps(
-  nodes: GraphNode[],
-  _valueRingR: number,
-  _rootRingR: number,
-  _supportRingR: number,
-): void {
-  const tiers: Tier[] = ["value", "root", "support"];
-
+function resolveOverlaps(nodes: GraphNode[], tiers: Tier[]): void {
   tiers.forEach((tier) => {
     const tierNodes = nodes.filter((n) => n.tier === tier);
     if (tierNodes.length < 2) return;
@@ -461,22 +395,17 @@ function resolveOverlaps(
     for (let i = 0; i < tierNodes.length; i++) {
       const current = tierNodes[i];
       const next = tierNodes[(i + 1) % tierNodes.length];
-
       const dx = next.x - current.x;
       const dy = next.y - current.y;
       const distance = Math.hypot(dx, dy);
       const minDistance = current.r + next.r + NODE_GAP;
-
       if (distance < minDistance) {
         const overlap = minDistance - distance;
         const angle = Math.atan2(dy, dx);
         const pushX = (Math.cos(angle) * overlap) / 2;
         const pushY = (Math.sin(angle) * overlap) / 2;
-
-        current.x -= pushX;
-        current.y -= pushY;
-        next.x += pushX;
-        next.y += pushY;
+        current.x -= pushX; current.y -= pushY;
+        next.x += pushX; next.y += pushY;
       }
     }
   });
