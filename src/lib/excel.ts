@@ -418,7 +418,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         supports: [],
       };
       rootsMap.set(rootTitle, root);
-      value.promises.push(root);
+      if (!value.promises.some((p) => p.id === root!.id)) value.promises.push(root);
       rootToValue.set(rootTitle, valueName);
       stats.roots++;
     } else {
@@ -431,7 +431,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
 
           if (currentCount < existingCount) {
             existingValue.promises = existingValue.promises.filter((p) => p.id !== root!.id);
-            value.promises.push(root);
+            if (!value.promises.some((p) => p.id === root!.id)) value.promises.push(root);
             rootToValue.set(rootTitle, valueName);
             warnings.push(
               `Обещание "${rootTitle}" перемещено из "${existingValueName}" (${existingCount} обещаний) в "${valueName}" (${currentCount + 1} обещаний)`,
