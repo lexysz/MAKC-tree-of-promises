@@ -15,7 +15,7 @@ import type { SupportDef } from "./data/tree";
 const AdminLogin = lazy(() => import("./components/admin/AdminLogin"));
 const AdminPanel = lazy(() => import("./components/admin/AdminPanel"));
 
-// ─── Constants ─────────────────────────────────────────────────
+// ─── Constants ──────────────────────────────────────────────────
 
 const ZOOM_IN_FACTOR = 1.35;
 const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
@@ -111,7 +111,7 @@ function useKeyboardShortcuts(view: View, canvasRef: React.RefObject<TreeCanvasH
   }, [view, canvasRef, onEscape]);
 }
 
-// ─── Icons ──────────────────────────────────────────────────────
+// ─── Icons ───────────────────────────────────────────────────────
 
 function LogoIcon() {
   return (
@@ -190,15 +190,6 @@ function Stat({ n, label, color }: { n: number; label: string; color: string }) 
         {n}
       </span>
       <span className="text-[11px] text-mist-500">{label}</span>
-    </span>
-  );
-}
-
-function LegendRow({ circle, label }: { circle: React.ReactNode; label: string }) {
-  return (
-    <span className="flex items-center gap-3.5 text-[17px] text-mist-400">
-      {circle}
-      {label}
     </span>
   );
 }
@@ -455,63 +446,6 @@ function Header({
   );
 }
 
-function Legend({ companyLogo }: { companyLogo?: string }) {
-  return (
-    <div className="hint-in pointer-events-none absolute bottom-4 left-4 z-20 hidden flex-col gap-4 rounded-xl border border-ink-700/50 bg-ink-900/80 px-6 py-5 backdrop-blur-md sm:flex md:bottom-5 md:left-5">
-      <p className="text-[14px] font-bold uppercase tracking-[0.18em] text-mist-500">Легенда</p>
-
-      <LegendRow
-        circle={
-          <svg width="30" height="30" viewBox="0 0 30 30">
-            <circle cx="15" cy="15" r="13.5" fill="#0d1b24" stroke="#f2b45a" strokeWidth="2.7" />
-            <circle cx="15" cy="10.5" r="2.25" fill="#f2b45a" />
-            <circle cx="10.5" cy="18" r="2.25" fill="#f2b45a" />
-            <circle cx="19.5" cy="18" r="2.25" fill="#f2b45a" />
-          </svg>
-        }
-        label="Ценность"
-      />
-
-      <LegendRow
-        circle={
-          <svg width="30" height="30" viewBox="0 0 30 30">
-            <defs>
-              <clipPath id="legend-logo-clip">
-                <circle cx="15" cy="15" r="12" />
-              </clipPath>
-            </defs>
-            <circle cx="15" cy="15" r="13.5" fill="#0d1b24" stroke="#43d6b5" strokeWidth="2.7" />
-            {companyLogo ? (
-              <image
-                href={companyLogo}
-                x="3"
-                y="3"
-                width="24"
-                height="24"
-                preserveAspectRatio="xMidYMid meet"
-                clipPath="url(#legend-logo-clip)"
-              />
-            ) : (
-              <rect x="10.5" y="10.5" width="9" height="9" fill="#43d6b5" opacity="0.9" />
-            )}
-          </svg>
-        }
-        label="Корневое обещание"
-      />
-
-      <LegendRow
-        circle={
-          <svg width="30" height="30" viewBox="0 0 30 30">
-            <circle cx="15" cy="15" r="13.5" fill="#0d1b24" stroke="#6fb4f2" strokeWidth="2.7" />
-            <circle cx="15" cy="15" r="4.5" fill="#6fb4f2" />
-          </svg>
-        }
-        label="Поддерживающее"
-      />
-    </div>
-  );
-}
-
 function KeyboardHints({ isAdmin }: { isAdmin: boolean }) {
   return (
     <>
@@ -566,7 +500,7 @@ export default function App() {
   // Запоминаем, была ли открыта панель фильтра до открытия карточки,
   // чтобы восстановить её после закрытия карточки
   const [panelStateBeforeCard, setPanelStateBeforeCard] = useState<boolean | null>(null);
-  // Флаг: после импорта Excel нужна немедленная синхронизация с Supabase
+  // Флаг: после импорта Excel нужна немедленная синхронизация
   const [importSyncPending, setImportSyncPending] = useState(false);
   const canvasRef = useRef<TreeCanvasHandle>(null);
   // Пропускаем первую центровку: начальную анимацию делает сам TreeCanvas
@@ -578,8 +512,6 @@ export default function App() {
   const generalPromises = data.generalPromises ?? [];
 
   // ─── Поиск: граф + общие + поддерживающие общих ─────────────────
-  // Поддерживающие общих не являются узлами графа, но должны находиться
-  // поиском; клик по ним открывает карточку родительского общего (аккордеон).
   const generalSupportEntries = useMemo(() => {
     const out: { node: any; generalId: string }[] = [];
     const walk = (supports: SupportDef[] | undefined, generalId: string) => {
@@ -641,7 +573,6 @@ export default function App() {
 
   /**
    * Массив предков для хлебных крошек: от ценности до непосредственного родителя.
-   * Порядок — от верхнего уровня к нижнему (ценность → корневое → поддерживающее).
    */
   const ancestors = useMemo(() => {
     if (!selectedNode) return [];
@@ -650,7 +581,6 @@ export default function App() {
     const chain: GraphNode[] = [];
     let current = selectedNode;
 
-    // Идём вверх по parentId, собирая предков (без самой компании)
     while (current.parentId) {
       const parent = byId.get(current.parentId);
       if (!parent || parent.tier === "company") break;
@@ -674,8 +604,6 @@ export default function App() {
 
   const counts = useMemo(() => {
     const c = { value: 0, root: 0, support: 0, general: generalPromises.length };
-    // Поддерживающие с одинаковым названием (дубли в разных ценностях)
-    // считаем за одно обещание.
     const supportTitles = new Set<string>();
     for (const n of graph.nodes) {
       if (n.tier === "value") c.value += 1;
@@ -701,16 +629,14 @@ export default function App() {
     }
   }, [selectedGeneralId, generalPromises]);
 
-  // Немедленная синхронизация после импорта: срабатывает ПОСЛЕ коммита нового
-  // состояния, поэтому forceSync получает уже обновлённый снимок данных.
+  // Немедленная синхронизация после импорта
   useEffect(() => {
     if (!importSyncPending) return;
     setImportSyncPending(false);
     void forceSync();
   }, [importSyncPending, forceSync]);
 
-  // Favicon вкладки = актуальный логотип компании (data URL из tree.json / GitHub).
-  // Пока логотипа нет — фирменный знак из public/favicon.svg.
+  // Favicon вкладки = актуальный логотип компании; пока нет — фирменный знак.
   useEffect(() => {
     const logo = data.company.logo;
     let link = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
@@ -764,7 +690,6 @@ export default function App() {
   const clearSelection = () => {
     setSelectedId(null);
     setSelectedGeneralId(null);
-    // Возвращаемся к фильтрации: восстанавливаем панель, если она была открыта до карточки
     if (panelStateBeforeCard) {
       setShowDepartmentPanel(true);
       setPanelStateBeforeCard(null);
@@ -773,8 +698,8 @@ export default function App() {
 
   useKeyboardShortcuts(view, canvasRef, clearSelection);
 
-  // Единая точка управления камерой: срабатывает ПОСЛЕ коммита DOM,
-  // когда контейнер канваса уже получил финальную ширину.
+  // Единая точка управления камерой. byId намеренно НЕ в зависимостях:
+  // drag меняет координаты и ссылку byId, иначе экран «отъезжал» после drag.
   useEffect(() => {
     if (firstCameraRun.current) {
       firstCameraRun.current = false;
@@ -791,15 +716,10 @@ export default function App() {
     });
 
     return () => cancelAnimationFrame(raf);
-    // byId намеренно НЕ в зависимостях: перетаскивание узла меняет координаты
-    // и ссылку byId, из-за чего эффект перезапускался и вызывал fit(true) —
-    // экран «отъезжал» после каждого drag. byId доступен внутри через замыкание.
   }, [selectedId, selectedGeneralId, showDepartmentPanel]);
 
   // ─── Фильтрация по подразделениям ──────────────────────────────
 
-  // Извлекаем уникальные подразделения из поля «Кто даёт»
-  // (узлы + общие обещания + поддерживающие общих)
   const departments: DepartmentInfo[] = useMemo(() => {
     const deptMap = new Map<string, number>();
     const addWho = (who?: string) => {
@@ -829,7 +749,6 @@ export default function App() {
       .sort((a, b) => a.name.localeCompare(b.name, "ru"));
   }, [graph.nodes, generalPromises]);
 
-  // Находим узлы дерева, где выбранное подразделение фигурирует в поле «Кто даёт»
   const filterHighlightIds = useMemo(() => {
     if (!departmentFilter) return null;
 
@@ -843,7 +762,6 @@ export default function App() {
     return ids;
   }, [departmentFilter, graph.nodes]);
 
-  // Совпадает ли общее (или любое его поддерживающее) с выбранным подразделением
   const generalMatchesDepartment = (gp: (typeof generalPromises)[number], dept: string): boolean => {
     if (matchesDepartment(gp.who, dept)) return true;
     const walk = (supports?: SupportDef[]): boolean => {
@@ -856,7 +774,6 @@ export default function App() {
     return walk(gp.supports);
   };
 
-  // Формируем список отфильтрованных обещаний (узлы + общие) с деталями
   const filteredNodes: FilteredNode[] = useMemo(() => {
     if (!departmentFilter) return [];
 
@@ -905,8 +822,6 @@ export default function App() {
 
   // ─── Рендеринг ─────────────────────────────────────────────────
 
-  // ПРОГРЕССИВНАЯ ЗАГРУЗКА: блокируем экран ТОЛЬКО на проверку авторизации.
-  // Само дерево рендерится мгновенно из localStorage, даже если Supabase ещё грузится.
   if (checking) {
     return (
       <div className="relative h-full w-full overflow-hidden bg-ink-950 font-body text-mist-100">
@@ -985,14 +900,12 @@ export default function App() {
         onDepartmentFilterClick={() => {
           const next = !showDepartmentPanel;
           setShowDepartmentPanel(next);
-          // Панель открыта вручную — автовозврат после карточки не нужен
           if (next) setPanelStateBeforeCard(null);
         }}
         isFilterActive={departmentFilter !== null}
         syncStatus={syncStatus}
       />
 
-      <Legend companyLogo={data.company.logo} />
       <KeyboardHints isAdmin={authed} />
       <ZoomControls canvasRef={canvasRef} />
 
@@ -1011,7 +924,6 @@ export default function App() {
         onBackToCompany={() => navigate(data.company.id)}
       />
 
-      {/* Панель фильтрации по подразделению */}
       {showDepartmentPanel && (
         <DepartmentFilterPanel
           departments={departments}
