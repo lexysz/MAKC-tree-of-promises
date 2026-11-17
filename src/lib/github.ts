@@ -51,10 +51,12 @@ async function putFile(
   path: string,
   contentBase64: string,
   sha: string,
-  message: string
+  message: string,
+  keepalive = false
 ): Promise<void> {
   const res = await fetch(`${BASE_URL}/${path}`, {
     method: "PUT",
+    keepalive,
     headers: {
       Authorization: `token ${TOKEN}`,
       Accept: "application/vnd.github.v3+json",
@@ -79,11 +81,11 @@ export async function loadTreeFromGitHub(): Promise<TreeData | null> {
   return JSON.parse(json) as TreeData;
 }
 
-export async function saveTreeToGitHub(data: TreeData): Promise<void> {
+export async function saveTreeToGitHub(data: TreeData, keepalive = false): Promise<void> {
   const file = await getFile(TREE_PATH);
   const content = encodeBase64Utf8(JSON.stringify(data, null, 2));
   const message = `Update tree data ${new Date().toISOString()}`;
-  await putFile(TREE_PATH, content, file?.sha ?? "", message);
+  await putFile(TREE_PATH, content, file?.sha ?? "", message, keepalive);
 }
 
 export async function loadLogoFromGitHub(): Promise<string | null> {
