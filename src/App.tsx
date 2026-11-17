@@ -912,7 +912,7 @@ export default function App() {
       <DetailPanel
         node={selectedNode}
         parent={selectedNode?.parentId ? byId.get(selectedNode.parentId) ?? null : null}
-        children={selectedNode ? selectedNode.childrenIds.map((id) => byId.get(id)!).filter(Boolean) : []}
+        children={selectedNode ? Array.from(new Set(selectedNode.childrenIds)).map((id) => byId.get(id)!).filter(Boolean) : []}
         valueNode={selectedNode ? byId.get(selectedNode.familyId) ?? null : null}
         generalPromises={generalPromises}
         generalPromise={selectedGeneral}
