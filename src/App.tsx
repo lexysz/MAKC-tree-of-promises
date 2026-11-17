@@ -8,13 +8,14 @@ import { parseDepartments, matchesDepartment } from "./lib/departments";
 import { useTreeData, type SyncStatus } from "./state/useTreeData";
 import { supabase } from "./lib/supabase";
 import type { Session } from "@supabase/supabase-js";
+import type { SupportDef } from "./data/tree";
 
 // Админка и её тяжёлые зависимости (xlsx, dnd-kit, recharts) — отдельный чанк:
 // грузится только при входе в режим admin, зрителям дерева не скачивается.
 const AdminLogin = lazy(() => import("./components/admin/AdminLogin"));
 const AdminPanel = lazy(() => import("./components/admin/AdminPanel"));
 
-// ─── Constants ──────────────────────────────────────────────────
+// ─── Constants ─────────────────────────────────────────────────
 
 const ZOOM_IN_FACTOR = 1.35;
 const ZOOM_OUT_FACTOR = 1 / ZOOM_IN_FACTOR;
@@ -327,7 +328,7 @@ function SearchBar({ query, setQuery, showResults, setShowResults, results, onCl
               <div className="flex items-center gap-2 text-[11px] text-mist-400 w-full">
                 <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: node.color }}></span>
                 <span>
-                  {node.tier === "value" ? "Ценность" : node.tier === "root" ? "Корневое" : "Поддерживающее"}
+                  {node.tier === "value" ? "Ценность" : node.tier === "root" ? "Корневое" : node.tier === "general" ? "Общее" : "Поддерживающее"}
                 </span>
                 {node.who && (
                   <>
@@ -573,9 +574,59 @@ export default function App() {
 
   const graph = useMemo(() => buildGraph(data.company, data.values, data.customPositions), [data]);
   const byId = useMemo(() => new Map(graph.nodes.map((n) => [n.id, n])), [graph]);
-  const search = useSearch(graph.nodes);
 
   const generalPromises = data.generalPromises ?? [];
+
+  // ─── Поиск: граф + общие + поддерживающие общих ─────────────────
+  // Поддерживающие общих не являются узлами графа, но должны находиться
+  // поиском; клик по ним открывает карточку родительского общего (аккордеон).
+  const generalSupportEntries = useMemo(() => {
+    const out: { node: any; generalId: string }[] = [];
+    const walk = (supports: SupportDef[] | undefined, generalId: string) => {
+      for (const s of supports ?? []) {
+        out.push({
+          node: {
+            id: s.id,
+            tier: "support",
+            title: s.title,
+            short: s.title,
+            description: s.description,
+            who: s.who,
+            toWhom: s.toWhom,
+            metrics: s.metrics,
+            color: CORE_COLOR,
+          },
+          generalId,
+        });
+        walk(s.supports, generalId);
+      }
+    };
+    for (const gp of generalPromises) walk(gp.supports, gp.id);
+    return out;
+  }, [generalPromises]);
+
+  const searchNodes = useMemo(() => {
+    const generalPseudo = generalPromises.map((gp) => ({
+      id: gp.id,
+      tier: "general",
+      title: gp.title,
+      short: gp.title,
+      description: gp.description,
+      who: gp.who,
+      toWhom: gp.toWhom,
+      metrics: gp.metrics,
+      color: CORE_COLOR,
+    }));
+    return [...graph.nodes, ...generalPseudo, ...generalSupportEntries.map((e) => e.node)];
+  }, [graph.nodes, generalPromises, generalSupportEntries]);
+
+  const supportParentMap = useMemo(
+    () => new Map(generalSupportEntries.map((e) => [e.node.id as string, e.generalId])),
+    [generalSupportEntries],
+  );
+  const generalIdSet = useMemo(() => new Set(generalPromises.map((g) => g.id)), [generalPromises]);
+
+  const search = useSearch(searchNodes);
 
   const selectedNode = selectedId ? byId.get(selectedId) ?? null : null;
   const selectedGeneral = useMemo(
@@ -658,7 +709,7 @@ export default function App() {
     void forceSync();
   }, [importSyncPending, forceSync]);
 
-    // Favicon вкладки = актуальный логотип компании (data URL из tree.json / GitHub).
+  // Favicon вкладки = актуальный логотип компании (data URL из tree.json / GitHub).
   // Пока логотипа нет — фирменный знак из public/favicon.svg.
   useEffect(() => {
     const logo = data.company.logo;
@@ -701,6 +752,15 @@ export default function App() {
     setSelectedGeneralId(id);
   };
 
+  // Клик по результату поиска: supporting общего → карточка его общего;
+  // общее → карточка общего; обычный узел графа → карточка узла.
+  const handleSearchSelect = (id: string) => {
+    const gid = supportParentMap.get(id);
+    if (gid) navigateGeneral(gid);
+    else if (generalIdSet.has(id)) navigateGeneral(id);
+    else navigate(id);
+  };
+
   const clearSelection = () => {
     setSelectedId(null);
     setSelectedGeneralId(null);
@@ -738,21 +798,30 @@ export default function App() {
 
   // ─── Фильтрация по подразделениям ──────────────────────────────
 
-  // Извлекаем уникальные подразделения из поля «Кто даёт» (узлы + общие обещания)
+  // Извлекаем уникальные подразделения из поля «Кто даёт»
+  // (узлы + общие обещания + поддерживающие общих)
   const departments: DepartmentInfo[] = useMemo(() => {
     const deptMap = new Map<string, number>();
+    const addWho = (who?: string) => {
+      for (const dept of parseDepartments(who)) {
+        deptMap.set(dept, (deptMap.get(dept) || 0) + 1);
+      }
+    };
+    const walkSupports = (supports?: SupportDef[]) => {
+      for (const s of supports ?? []) {
+        addWho(s.who);
+        walkSupports(s.supports);
+      }
+    };
 
     for (const node of graph.nodes) {
       if (node.tier !== "root" && node.tier !== "support") continue;
-      for (const dept of parseDepartments(node.who)) {
-        deptMap.set(dept, (deptMap.get(dept) || 0) + 1);
-      }
+      addWho(node.who);
     }
 
     for (const gp of generalPromises) {
-      for (const dept of parseDepartments(gp.who)) {
-        deptMap.set(dept, (deptMap.get(dept) || 0) + 1);
-      }
+      addWho(gp.who);
+      walkSupports(gp.supports);
     }
 
     return Array.from(deptMap.entries())
@@ -773,6 +842,19 @@ export default function App() {
     }
     return ids;
   }, [departmentFilter, graph.nodes]);
+
+  // Совпадает ли общее (или любое его поддерживающее) с выбранным подразделением
+  const generalMatchesDepartment = (gp: (typeof generalPromises)[number], dept: string): boolean => {
+    if (matchesDepartment(gp.who, dept)) return true;
+    const walk = (supports?: SupportDef[]): boolean => {
+      for (const s of supports ?? []) {
+        if (matchesDepartment(s.who, dept)) return true;
+        if (walk(s.supports)) return true;
+      }
+      return false;
+    };
+    return walk(gp.supports);
+  };
 
   // Формируем список отфильтрованных обещаний (узлы + общие) с деталями
   const filteredNodes: FilteredNode[] = useMemo(() => {
@@ -803,7 +885,7 @@ export default function App() {
     }
 
     for (const gp of generalPromises) {
-      if (matchesDepartment(gp.who, departmentFilter)) {
+      if (generalMatchesDepartment(gp, departmentFilter)) {
         result.push({
           id: gp.id,
           title: gp.title,
@@ -899,7 +981,7 @@ export default function App() {
         counts={counts}
         search={search}
         onAdminClick={() => setView("admin")}
-        onNavigate={navigate}
+        onNavigate={handleSearchSelect}
         onDepartmentFilterClick={() => {
           const next = !showDepartmentPanel;
           setShowDepartmentPanel(next);
