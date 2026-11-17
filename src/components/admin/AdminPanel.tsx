@@ -5,6 +5,7 @@ import type { NodePatch } from "../../state/useTreeData";
 import type { ImportResult } from "../../lib/excel";
 import { TEMPLATE_HEADERS, downloadTemplate, parseWorkbook } from "../../lib/excel";
 import { saveLogoToGitHub } from "../../lib/github";
+import GeneralSupportsAccordion from "../GeneralSupportsAccordion";
 
 // ─── Constants ──────────────────────────────────────────────────
 
@@ -29,6 +30,7 @@ interface AnyDef {
   metrics?: string;
   color: string;
   logo?: string;
+  supports?: SupportDef[];
 }
 
 interface Props {
@@ -95,6 +97,7 @@ function findAny(data: TreeData, id: string): AnyDef | null {
         toWhom: gp.toWhom,
         metrics: gp.metrics,
         color: CORE_COLOR,
+        supports: gp.supports,
       };
     }
   }
@@ -386,7 +389,6 @@ function NodeEditor({ node, onSave, onSaveGeneral, onUpdateCompany }: NodeEditor
 
     setUploading(true);
     try {
-      // saveLogoToGitHub возвращает строку data URL (base64), которую можно сразу использовать в img src
       const dataUrl = await saveLogoToGitHub(file);
       setLogo(dataUrl);
       if (isCompany) {
@@ -552,6 +554,24 @@ function NodeEditor({ node, onSave, onSaveGeneral, onUpdateCompany }: NodeEditor
               />
               <p className="mt-1.5 text-[10.5px] text-mist-500">Каждая строка — отдельная метрика</p>
             </div>
+          </div>
+        )}
+
+        {isGeneral && (
+          <div className="border-t border-ink-700/50 pt-5">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="text-[10.5px] font-bold uppercase tracking-[0.18em] text-mist-500">
+                Поддерживающие обещания
+              </div>
+              <span className="rounded-full border border-ink-700/70 px-2 py-px text-[10px] font-semibold text-mist-500">
+                read-only · из Excel
+              </span>
+            </div>
+            <GeneralSupportsAccordion supports={node.supports ?? []} />
+            <p className="mt-2 text-[10.5px] leading-relaxed text-mist-500">
+              Список наполняется через лист «Цепочки» Excel (родитель — общее обещание).
+              Редактирование цепочек — в Excel, затем повторный импорт.
+            </p>
           </div>
         )}
       </div>
@@ -963,6 +983,7 @@ export default function AdminPanel({
                       active={selectedId === gp.id}
                       onSelect={setSelectedId}
                       visible={!query || (gp.title ?? "").toLowerCase().includes(query.trim().toLowerCase())}
+                      count={gp.supports?.length ?? 0}
                     />
                   ))}
                 </div>
