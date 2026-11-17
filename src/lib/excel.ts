@@ -4,6 +4,8 @@ import {
   findSupportByTitle,
   findSupportAnywhere,
   findGeneralByTitle,
+  normalizeTitle,
+  MAX_TREE_DEPTH,
 } from "../data/tree";
 import type { GeneralPromiseDef, RootDef, ValueDef, SupportDef } from "../data/tree";
 
@@ -102,8 +104,6 @@ export async function downloadTemplate() {
       "Команда продукта",
       "Время генерации < 5 минут",
     ],
-    // Пример: родитель — ОБЩЕЕ обещание (лист «Общие обещания»),
-    // дочернее становится его поддерживающим.
     [
       "Выплата за 24 часа после подачи документов",
       "Автоматическая проверка комплекта документов",
@@ -207,7 +207,6 @@ function detectMainHeader(rows: unknown[][]): HeaderDetection | null {
       if (rule) map[rule.key] = idx;
     });
 
-    // Колонки метрик разбираем отдельно: заголовки могут совпадать («Метрики»).
     const supportIdx = map.support;
     row.forEach((cell, idx) => {
       const h = normHeader(cellStr(cell));
@@ -236,7 +235,6 @@ function detectMainHeader(rows: unknown[][]): HeaderDetection | null {
     });
 
     // Главный лист обязан иметь ценность + корневое + поддерживающее.
-    // Это отсекает листы «Общие» и «Цепочки» от误 распознавания как главного.
     if (map.value !== undefined && map.root !== undefined && map.support !== undefined) {
       return { headerIdx: i, columnMap: map };
     }
@@ -325,8 +323,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data, { type: "array" });
 
-  // Читаем все листы один раз и выбираем их ПО СОДЕРЖИМОМУ (заголовкам),
-  // а не по имени/порядку — иначе новые имена листов ломают импорт.
+  // Читаем все листы один раз и выбираем их ПО СОДЕРЖИМОМУ (заголовкам).
   const sheetNames = workbook.SheetNames;
   const rowsBySheet = new Map<string, unknown[][]>();
   for (const name of sheetNames) {
@@ -544,7 +541,7 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
     }
   }
 
-  // ─── Цепочки: лист выбираем по заголовкам (не главный и не общие) ───
+  // ─── Цепочки: несколько детей, слияние метрик, отложенные ссылки ───
 
   const chainSheetName =
     sheetNames.find(
@@ -563,6 +560,79 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
 
     const valuesArray = Array.from(valuesMap.values());
 
+    // Глубина каждого supporting: главные/общие прямые = 1, вложенные глубже.
+    const depthOf = new Map<string, number>();
+    const markDepths = (supports: SupportDef[] | undefined, depth: number) => {
+      for (const s of supports ?? []) {
+        depthOf.set(s.id, depth);
+        markDepths(s.supports, depth + 1);
+      }
+    };
+    for (const v of valuesArray) for (const r of v.promises) markDepths(r.supports, 1);
+    for (const g of generalPromises) markDepths(g.supports, 1);
+
+    interface PendingRow {
+      i: number;
+      parentTitle: string;
+      childTitle: string;
+      who?: string;
+      toWhom?: string;
+      metrics?: string;
+    }
+
+    // Пытается привязать строку. false = родитель ещё не существует (отложим).
+    const tryAttach = (row: PendingRow): boolean => {
+      const supportMatch = findSupportAnywhere(valuesArray, generalPromises, row.parentTitle);
+      const generalMatch = findGeneralByTitle(generalPromises, row.parentTitle);
+      if (!supportMatch && !generalMatch) return false;
+
+      const targets: Array<{ list: SupportDef[]; depth: number }> = [];
+      if (supportMatch) {
+        const parentDepth = depthOf.get(supportMatch.id) ?? 1;
+        const childDepth = parentDepth + 1;
+        if (childDepth > MAX_TREE_DEPTH) {
+          warnings.push(
+            `Лист "${chainSheetName}", строка ${row.i}: превышена максимальная глубина дерева (${MAX_TREE_DEPTH}) для "${row.childTitle}"`,
+          );
+          return true;
+        }
+        if (!supportMatch.supports) supportMatch.supports = [];
+        targets.push({ list: supportMatch.supports, depth: childDepth });
+      }
+      if (generalMatch) {
+        if (!generalMatch.supports) generalMatch.supports = [];
+        targets.push({ list: generalMatch.supports, depth: 1 });
+      }
+
+      let attached = false;
+      for (const t of targets) {
+        const existing = t.list.find((s) => normalizeTitle(s.title) === normalizeTitle(row.childTitle));
+        if (existing) {
+          // Повтор ребёнка = дополнение метрик/паспорта, без предупреждения.
+          if (row.metrics) existing.metrics = appendMetric(existing.metrics, row.metrics);
+          if (row.who && !existing.who) existing.who = row.who;
+          if (row.toWhom && !existing.toWhom) existing.toWhom = row.toWhom;
+          depthOf.set(existing.id, Math.max(depthOf.get(existing.id) ?? t.depth, t.depth));
+        } else {
+          const child: SupportDef = {
+            id: `s-${slugify(row.childTitle)}-${t.list.length}`,
+            title: row.childTitle,
+            description: `Поддерживающее: ${row.childTitle}`,
+            who: row.who,
+            toWhom: row.toWhom,
+            metrics: row.metrics,
+          };
+          t.list.push(child);
+          depthOf.set(child.id, t.depth);
+          attached = true;
+        }
+      }
+      if (attached) stats.chains++;
+      return true;
+    };
+
+    const pending: PendingRow[] = [];
+
     for (let i = chainHeader.headerIdx + 1; i < chainRows.length; i++) {
       const row = chainRows[i];
       if (!row || row.length === 0) continue;
@@ -579,70 +649,35 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         continue;
       }
 
-      const supportMatch = findSupportAnywhere(valuesArray, generalPromises, parentTitle);
-      const generalMatch = findGeneralByTitle(generalPromises, parentTitle);
+      const pendingRow: PendingRow = {
+        i: i + 1,
+        parentTitle,
+        childTitle,
+        who: getChain(row, "who") || undefined,
+        toWhom: getChain(row, "toWhom") || undefined,
+        metrics: getChain(row, "metrics") || undefined,
+      };
 
-      if (!supportMatch && !generalMatch) {
-        warnings.push(
-          `Лист "${chainSheetName}", строка ${i + 1}: не найдено родительское обещание "${parentTitle}"`,
-        );
-        continue;
+      if (!tryAttach(pendingRow)) pending.push(pendingRow);
+    }
+
+    // Отложенные строки: родитель может создаться более поздней строкой.
+    // Повторяем проходы, пока есть прогресс.
+    let remaining = pending;
+    let progress = true;
+    while (remaining.length > 0 && progress) {
+      progress = false;
+      const next: PendingRow[] = [];
+      for (const row of remaining) {
+        if (tryAttach(row)) progress = true;
+        else next.push(row);
       }
-
-      const childWho = getChain(row, "who") || undefined;
-      const childToWhom = getChain(row, "toWhom") || undefined;
-      const childMetrics = getChain(row, "metrics") || undefined;
-      let attached = false;
-
-      if (supportMatch) {
-        if (supportMatch.supports && supportMatch.supports.length > 0) {
-          warnings.push(
-            `Лист "${chainSheetName}", строка ${i + 1}: у "${parentTitle}" уже есть дочерние обещания (достигнут лимит 7 уровней дерева)`,
-          );
-        } else if (supportMatch.supports?.some((s) => s.title === childTitle)) {
-          warnings.push(
-            `Лист "${chainSheetName}", строка ${i + 1}: дочернее обещание "${childTitle}" уже есть у "${parentTitle}"`,
-          );
-        } else {
-          if (!supportMatch.supports) supportMatch.supports = [];
-          supportMatch.supports.push({
-            id: `s-${slugify(childTitle)}-${supportMatch.supports.length}`,
-            title: childTitle,
-            description: `Поддерживающее: ${childTitle}`,
-            who: childWho,
-            toWhom: childToWhom,
-            metrics: childMetrics,
-          });
-          attached = true;
-        }
-      }
-
-      if (generalMatch) {
-        if (!generalMatch.supports) generalMatch.supports = [];
-        if (generalMatch.supports.some((s) => s.title === childTitle)) {
-          warnings.push(
-            `Лист "${chainSheetName}", строка ${i + 1}: поддерживающее "${childTitle}" уже есть у общего "${parentTitle}"`,
-          );
-        } else {
-          generalMatch.supports.push({
-            id: `s-${slugify(childTitle)}-${generalMatch.supports.length}`,
-            title: childTitle,
-            description: `Поддерживающее: ${childTitle}`,
-            who: childWho,
-            toWhom: childToWhom,
-            metrics: childMetrics,
-          });
-          attached = true;
-        }
-      }
-
-      if (supportMatch && generalMatch) {
-        warnings.push(
-          `Лист "${chainSheetName}", строка ${i + 1}: "${childTitle}" привязано и к поддерживающему, и к общему "${parentTitle}" (выводится в обоих)`,
-        );
-      }
-
-      if (attached) stats.chains++;
+      remaining = next;
+    }
+    for (const row of remaining) {
+      warnings.push(
+        `Лист "${chainSheetName}", строка ${row.i}: не найдено родительское обещание "${row.parentTitle}"`,
+      );
     }
   }
 
