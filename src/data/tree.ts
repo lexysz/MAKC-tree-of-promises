@@ -115,6 +115,21 @@ export const MAX_TREE_DEPTH = 7;
 export type NodeDepth = 0 | 1 | 2 | 3 | 4;
 
 /**
+ * Толерантная нормализация названий для сопоставления строк Excel:
+ * unify типографских дефисов (U+2010..U+2015, минус) к '-',
+ * неразрывных/узких пробелов к обычному, схлопывание пробелов, trim, lower.
+ * Благодаря этому «профит‑тесты» (U+2011) и «профит-тесты» считаются одним названием.
+ */
+export function normalizeTitle(s: string): string {
+  return s
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .replace(/[\u00A0\u202F\u2007]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/**
  * Рекурсивно ищет SupportDef по title во всех уровнях вложенности supports.
  * Используется при связывании цепочек из Excel без ID.
  */
@@ -123,11 +138,11 @@ export function findSupportByTitle(
   title: string
 ): SupportDef | null {
   if (!roots || !title) return null;
-  const normalizedTitle = title.trim().toLowerCase();
+  const normalizedTitle = normalizeTitle(title);
 
   for (const root of roots) {
     for (const support of root.supports ?? []) {
-      if (support.title.trim().toLowerCase() === normalizedTitle) return support;
+      if (normalizeTitle(support.title) === normalizedTitle) return support;
       const found = findSupportInSupports(support.supports, title);
       if (found) return found;
     }
@@ -135,16 +150,16 @@ export function findSupportByTitle(
   return null;
 }
 
-/** Рекурсивный поиск supporting внутри массива supporting (任意 уровень). */
+/** Рекурсивный поиск supporting внутри массива supporting (любой уровень). */
 export function findSupportInSupports(
   supports: SupportDef[] | undefined,
   title: string
 ): SupportDef | null {
   if (!supports || !title) return null;
-  const normalizedTitle = title.trim().toLowerCase();
+  const normalizedTitle = normalizeTitle(title);
 
   for (const support of supports) {
-    if (support.title.trim().toLowerCase() === normalizedTitle) return support;
+    if (normalizeTitle(support.title) === normalizedTitle) return support;
     const found = findSupportInSupports(support.supports, title);
     if (found) return found;
   }
@@ -157,9 +172,9 @@ export function findGeneralByTitle(
   title: string
 ): GeneralPromiseDef | null {
   if (!generals || !title) return null;
-  const normalizedTitle = title.trim().toLowerCase();
+  const normalizedTitle = normalizeTitle(title);
   for (const g of generals) {
-    if (g.title.trim().toLowerCase() === normalizedTitle) return g;
+    if (normalizeTitle(g.title) === normalizedTitle) return g;
   }
   return null;
 }
