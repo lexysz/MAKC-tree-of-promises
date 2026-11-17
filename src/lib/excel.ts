@@ -494,7 +494,16 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
       }
     }
   }
-
+ // Финальная нормализация членства корней в ценностях: каждый корень
+  // принадлежит ровно одной ценности (итоговому rootToValue) и не дублируется.
+  // Устраняет случаи, когда повторяющиеся/похожие формулировки при переносах
+  // между ценностями оставались в двух списках сразу (дубль в карточке).
+  for (const v of valuesMap.values()) v.promises = [];
+  for (const [title, root] of rootsMap) {
+    const ownerName = rootToValue.get(title);
+    const owner = ownerName ? valuesMap.get(ownerName) : undefined;
+    if (owner && !owner.promises.some((p) => p.id === root.id)) owner.promises.push(root);
+  }
   // ─── Общие обещания: лист выбираем по заголовкам ───
 
   const generalPromises: GeneralPromiseDef[] = [];
