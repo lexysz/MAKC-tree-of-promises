@@ -1,5 +1,10 @@
 import type { WorkBook } from "xlsx";
-import { getValueColor, findSupportByTitle } from "../data/tree";
+import {
+  getValueColor,
+  findSupportByTitle,
+  findSupportAnywhere,
+  findGeneralByTitle,
+} from "../data/tree";
 import type { GeneralPromiseDef, RootDef, ValueDef, SupportDef } from "../data/tree";
 
 // xlsx попадает в отдельный чанк и грузится только при первом импорте/экспорте.
@@ -44,7 +49,7 @@ export const GENERAL_TEMPLATE_HEADERS = [
 ];
 
 export const CHAIN_TEMPLATE_HEADERS = [
-  "Родительское поддерживающее обещание",
+  "Родительское обещание (поддерживающее или общее)",
   "Дочернее поддерживающее обещание",
   "Кто дает",
   "Кому",
@@ -96,6 +101,15 @@ export async function downloadTemplate() {
       "DevOps",
       "Команда продукта",
       "Время генерации < 5 минут",
+    ],
+    // Пример: родитель — ОБЩЕЕ обещание (лист «Общие обещания»),
+    // дочернее становится его поддерживающим.
+    [
+      "Выплата за 24 часа после подачи документов",
+      "Автоматическая проверка комплекта документов",
+      "Урегулирование",
+      "Все клиенты",
+      "Проверка ≤ 2 часов",
     ],
   ];
 
@@ -546,7 +560,10 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
     }
   }
 
-  // ─── Цепочки поддерживающих обещаний: ищем третий лист ───
+  // ─── Цепочки поддерживающих: ищем третий лист ───
+  // Родителем может быть поддерживающее (под корневым ИЛИ под общим)
+  // или общее обещание. Если название совпадает и там, и там —
+  // дочернее привязывается к ОБОИМ (решение: выводим для обоих).
 
   let chainSheetName: string | null =
     workbook.SheetNames.find((n) => n.toLowerCase().includes("цепочк") || (n.toLowerCase().includes("поддерж") && !n.toLowerCase().includes("общ"))) ?? null;
@@ -576,6 +593,8 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
       return idx !== undefined ? cellStr(row[idx]) : "";
     };
 
+    const valuesArray = Array.from(valuesMap.values());
+
     for (let i = chainHeader.headerIdx + 1; i < chainRows.length; i++) {
       const row = chainRows[i];
       if (!row || row.length === 0) continue;
@@ -592,47 +611,74 @@ export async function parseWorkbook(file: File): Promise<ImportResult> {
         continue;
       }
 
-      let parentSupport: SupportDef | null = null;
-      for (const value of valuesMap.values()) {
-        parentSupport = findSupportByTitle(value.promises, parentTitle);
-        if (parentSupport) break;
-      }
+      const supportMatch = findSupportAnywhere(valuesArray, generalPromises, parentTitle);
+      const generalMatch = findGeneralByTitle(generalPromises, parentTitle);
 
-      if (!parentSupport) {
+      if (!supportMatch && !generalMatch) {
         warnings.push(
           `Лист "${chainSheetName}", строка ${i + 1}: не найдено родительское обещание "${parentTitle}"`,
         );
         continue;
       }
 
-      if (parentSupport.supports && parentSupport.supports.length > 0) {
+      const childWho = getChain(row, "who") || undefined;
+      const childToWhom = getChain(row, "toWhom") || undefined;
+      const childMetrics = getChain(row, "metrics") || undefined;
+      let attached = false;
+
+      // Ветка supporting-родителя: линейная цепочка (один ребёнок на родителя),
+      // как и раньше — обратная совместимость.
+      if (supportMatch) {
+        if (supportMatch.supports && supportMatch.supports.length > 0) {
+          warnings.push(
+            `Лист "${chainSheetName}", строка ${i + 1}: у "${parentTitle}" уже есть дочерние обещания (достигнут лимит 7 уровней дерева)`,
+          );
+        } else if (supportMatch.supports?.some((s) => s.title === childTitle)) {
+          warnings.push(
+            `Лист "${chainSheetName}", строка ${i + 1}: дочернее обещание "${childTitle}" уже есть у "${parentTitle}"`,
+          );
+        } else {
+          if (!supportMatch.supports) supportMatch.supports = [];
+          supportMatch.supports.push({
+            id: `s-${slugify(childTitle)}-${supportMatch.supports.length}`,
+            title: childTitle,
+            description: `Поддерживающее: ${childTitle}`,
+            who: childWho,
+            toWhom: childToWhom,
+            metrics: childMetrics,
+          });
+          attached = true;
+        }
+      }
+
+      // Ветка общего-родителя: список нескольких прямых поддерживающих,
+      // дедупликация по названию.
+      if (generalMatch) {
+        if (!generalMatch.supports) generalMatch.supports = [];
+        if (generalMatch.supports.some((s) => s.title === childTitle)) {
+          warnings.push(
+            `Лист "${chainSheetName}", строка ${i + 1}: поддерживающее "${childTitle}" уже есть у общего "${parentTitle}"`,
+          );
+        } else {
+          generalMatch.supports.push({
+            id: `s-${slugify(childTitle)}-${generalMatch.supports.length}`,
+            title: childTitle,
+            description: `Поддерживающее: ${childTitle}`,
+            who: childWho,
+            toWhom: childToWhom,
+            metrics: childMetrics,
+          });
+          attached = true;
+        }
+      }
+
+      if (supportMatch && generalMatch) {
         warnings.push(
-          `Лист "${chainSheetName}", строка ${i + 1}: у "${parentTitle}" уже есть дочерние обещания (достигнут лимит 7 уровней дерева)`,
+          `Лист "${chainSheetName}", строка ${i + 1}: "${childTitle}" привязано и к поддерживающему, и к общему "${parentTitle}" (выводится в обоих)`,
         );
-        continue;
       }
 
-      if (parentSupport.supports?.some((s) => s.title === childTitle)) {
-        warnings.push(
-          `Лист "${chainSheetName}", строка ${i + 1}: дочернее обещание "${childTitle}" уже есть у "${parentTitle}"`,
-        );
-        continue;
-      }
-
-      if (!parentSupport.supports) {
-        parentSupport.supports = [];
-      }
-
-      parentSupport.supports.push({
-        id: `s-${slugify(childTitle)}-${parentSupport.supports.length}`,
-        title: childTitle,
-        description: `Поддерживающее: ${childTitle}`,
-        who: getChain(row, "who") || undefined,
-        toWhom: getChain(row, "toWhom") || undefined,
-        metrics: getChain(row, "metrics") || undefined,
-      });
-
-      stats.chains++;
+      if (attached) stats.chains++;
     }
   }
 
