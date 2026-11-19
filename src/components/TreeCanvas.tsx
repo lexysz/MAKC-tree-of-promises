@@ -39,7 +39,9 @@ const EDGE_STYLES = {
 } as const;
 
 const NODE_STYLES = {
-  company: { fontSize: 45, letterSpacing: "0.22em" },
+  // Название компании внутри ядра: кегль подбирается под самое длинное
+  // слово, чтобы надпись гарантированно помещалась в круг.
+  company: { minFontSize: 30, maxFontSize: 88, maxWidthFactor: 1.44, charWidthFactor: 0.72, letterSpacingEm: 0.1 },
   value: { minFontSize: 44, maxFontSize: 100, lengthFactor: 0.65, maxWidthFactor: 1.6 },
   root: { minFontSize: 18, maxFontSize: 33, lengthFactor: 0.55, widthFactor: 1.2 },
 } as const;
@@ -548,53 +550,61 @@ function NodeGlyph({ node, hovered, selected, dimmed, companyLogo, dragOffset, i
   const finalX = node.x + offsetDx;
   const finalY = node.y + offsetDy;
 
-  const renderCompanyTier = () => (
-    <>
-      <circle r={r + 44} fill="none" stroke="rgba(143,182,192,0.25)" strokeWidth={2} strokeDasharray="2 12" className="ring-spin" />
-      <circle r={r} className="pulse-ring" fill="none" stroke="rgba(242,180,90,0.5)" strokeWidth={3} />
-      <circle r={r} fill="#0e2029" stroke="#8fb6c0" strokeWidth={4} />
-      {companyLogo ? (
-        <image
-          href={companyLogo}
-          x={-r * 0.7}
-          y={-r * 0.7}
-          width={r * 1.4}
-          height={r * 1.4}
-          preserveAspectRatio="xMidYMid meet"
-          clipPath="circle(100%)"
-        />
-      ) : (
-        <>
-          <circle r={8.4} fill="#eaf4f2" opacity={0.92} />
-          {[
-            { a: -90, c: "#43d6b5" },
-            { a: 30, c: "#f2b45a" },
-            { a: 150, c: "#f2836b" },
-          ].map(({ a, c }) => {
-            const rad = (a * Math.PI) / 180;
-            const x2 = Math.cos(rad) * 38;
-            const y2 = Math.sin(rad) * 38;
-            return (
-              <g key={a}>
-                <line x1={Math.cos(rad) * 12} y1={Math.sin(rad) * 12} x2={Math.cos(rad) * 30} y2={Math.sin(rad) * 30} stroke="#8fb6c0" strokeWidth={2.6} opacity={0.7} />
-                <circle cx={x2} cy={y2} r={6.8} fill={c} />
-              </g>
-            );
-          })}
-        </>
-      )}
-      <text
-        y={r + 48}
-        textAnchor="middle"
-        fontSize={NODE_STYLES.company.fontSize}
-        letterSpacing={NODE_STYLES.company.letterSpacing}
-        fill="#93abb2"
-        style={{ fontFamily: "var(--font-body)", fontWeight: 600 }}
-      >
-        {short.toUpperCase()}
-      </text>
-    </>
-  );
+  const renderCompanyTier = () => {
+    const { minFontSize, maxFontSize, maxWidthFactor, charWidthFactor, letterSpacingEm } = NODE_STYLES.company;
+    // Логотипа в ядре больше нет: название — единственное содержимое круга.
+    // Если short пуст (дерево ещё не пришло из GitHub) — берём title.
+    const label = (short || node.title || "").toUpperCase();
+    const maxWidth = r * maxWidthFactor;
+    const words = label.split(" ").filter(Boolean);
+    const longestWord = words.reduce((max, word) => Math.max(max, word.length), 1);
+    const fontSize = Math.min(
+      maxFontSize,
+      Math.max(minFontSize, maxWidth / (longestWord * charWidthFactor)),
+    );
+
+    const textLines: string[] = [];
+    let currentLine = "";
+    for (const word of words) {
+      const testLine = currentLine ? `${currentLine} ${word}` : word;
+      if (testLine.length * fontSize * charWidthFactor > maxWidth && currentLine) {
+        textLines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) textLines.push(currentLine);
+
+    const lineHeight = fontSize * 1.22;
+    const startY = -((textLines.length - 1) * lineHeight) / 2;
+    // Трекинг добавляется и после последнего символа, поэтому textAnchor
+    // сдвигает надпись влево на половину трекинга — компенсируем.
+    const trackingOffset = (fontSize * letterSpacingEm) / 2;
+
+    return (
+      <>
+        <circle r={r + 44} fill="none" stroke="rgba(143,182,192,0.25)" strokeWidth={2} strokeDasharray="2 12" className="ring-spin" />
+        <circle r={r} className="pulse-ring" fill="none" stroke="rgba(242,180,90,0.5)" strokeWidth={3} />
+        <circle r={r} fill="#0e2029" stroke="#8fb6c0" strokeWidth={4} />
+        {textLines.map((line, i) => (
+          <text
+            key={i}
+            x={trackingOffset}
+            y={startY + i * lineHeight}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize={fontSize}
+            letterSpacing={`${letterSpacingEm}em`}
+            fill="#eaf4f2"
+            style={{ fontFamily: "var(--font-display)", fontWeight: 600 }}
+          >
+            {line}
+          </text>
+        ))}
+      </>
+    );
+  };
 
   const renderValueTier = () => {
     const { minFontSize, maxFontSize, lengthFactor, maxWidthFactor } = NODE_STYLES.value;
@@ -1044,7 +1054,7 @@ const TreeCanvas = forwardRef<TreeCanvasHandle, Props>(function TreeCanvas(props
                 hovered={pointerInteraction.hoverId === node.id}
                 selected={selectedId === node.id}
                 dimmed={isDimming && shouldDim}
-                companyLogo={node.tier === "company" || node.tier === "root" ? companyLogo : undefined}
+                companyLogo={node.tier === "root" ? companyLogo : undefined}
                 zoom={canvasView.view.k}
                 dragOffset={dragNode.dragOffset}
                 isDragging={dragNode.dragNodeId === node.id}
