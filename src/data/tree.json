@@ -601,7 +601,7 @@
       "id": "v-gib-ost",
       "title": "Гибкость",
       "short": "Гибкость",
-      "description": "Ценность: Гибкость",
+      "description": "Гибкость",
       "color": "hsl(52.5, 70%, 58%)",
       "promises": [
         {
