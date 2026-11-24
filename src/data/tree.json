@@ -821,7 +821,7 @@
       "id": "v-dohodnost",
       "title": "Доходность",
       "short": "Доходность",
-      "description": "Ценность: Доходность",
+      "description": "Доходность по договору",
       "color": "hsl(327.5, 70%, 58%)",
       "promises": [
         {
