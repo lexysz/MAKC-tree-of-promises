@@ -401,7 +401,7 @@
       "id": "v-nadezhnost",
       "title": "Надёжность",
       "short": "Надёжность",
-      "description": "Ценность: Надёжность",
+      "description": "Надёжность",
       "color": "hsl(275.0, 70%, 58%)",
       "promises": [
         {
