@@ -4,7 +4,7 @@ import {
   saveTreeToGitHub,
   loadLogoFromGitHub,
 } from "../lib/github";
-import type { TreeData } from "../data/tree";
+import type { SupportDef, TreeData } from "../data/tree";
 import { createEmptyTree } from "../data/tree";
 
 const STORAGE_KEY = "makc-tree-data";
@@ -12,6 +12,20 @@ const STORAGE_KEY = "makc-tree-data";
 const AUTO_SYNC_DELAY_MS = 900;
 
 export type SyncStatus = "synced" | "syncing" | "error" | "offline";
+
+/**
+ * Патч полей узла из редактора админки.
+ * Компания и общие обещания идут через свои функции, здесь —
+ * ценность / корневое / поддерживающее обещание.
+ */
+export type NodePatch = Partial<{
+  title: string;
+  short: string;
+  description: string;
+  who: string;
+  toWhom: string;
+  metrics: string;
+}>;
 
 function loadFromStorage(): TreeData | null {
   try {
@@ -125,25 +139,51 @@ export function useTreeData() {
     };
   }, []);
 
-  const updateNode = (nodeId: string, updates: any) => {
+  const updateNode = (nodeId: string, updates: NodePatch) => {
     setData((prev) => {
       const newData = JSON.parse(JSON.stringify(prev)) as TreeData;
+
+      // Поддерживающие обходим рекурсивно: цепочки бывают глубже первого
+      // уровня, раньше всё, что ниже, молча не сохранялось.
+      const patchSupports = (supports: SupportDef[] | undefined): boolean => {
+        for (const support of supports ?? []) {
+          if (support.id === nodeId) {
+            Object.assign(support, updates);
+            return true;
+          }
+          if (patchSupports(support.supports)) return true;
+        }
+        return false;
+      };
+
+      let patched = false;
       for (const value of newData.values) {
+        // Ценность — самостоятельный узел дерева, её id тоже проверяем.
+        if (value.id === nodeId) {
+          Object.assign(value, updates);
+          patched = true;
+          break;
+        }
         for (const promise of value.promises) {
           if (promise.id === nodeId) {
             Object.assign(promise, updates);
+            patched = true;
             break;
           }
-          if (promise.supports) {
-            for (const support of promise.supports) {
-              if (support.id === nodeId) {
-                Object.assign(support, updates);
-                break;
-              }
-            }
+          if (patchSupports(promise.supports)) {
+            patched = true;
+            break;
           }
         }
+        if (patched) break;
       }
+
+      // Узел не найден — не пишем в localStorage и не шлём пустой коммит.
+      if (!patched) {
+        console.warn(`updateNode: узел "${nodeId}" не найден, изменения не применены`);
+        return prev;
+      }
+
       saveToStorage(newData);
       setModified(true);
       scheduleSync();
