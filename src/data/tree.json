@@ -601,7 +601,7 @@
       "id": "v-gib-ost",
       "title": "Гибкость",
       "short": "Гибкость",
-      "description": "Гибкость",
+      "description": "Гибкость принятия решений",
       "color": "hsl(52.5, 70%, 58%)",
       "promises": [
         {
