@@ -4,7 +4,7 @@
       "id": "v-s-orost",
       "title": "Скорость",
       "short": "Скорость",
-      "description": "Ценность: Скорость",
+      "description": "Скорость выплаты",
       "color": "hsl(0.0, 70%, 58%)",
       "promises": [
         {
